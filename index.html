@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>每個人都是一種文體</title>
+<style>html,body{margin:0;background:#f8efce;color:#748180}</style>
+</head>
+<body>
+<script>
+  if (location.protocol === 'file:') {
+    document.body.innerHTML = '<p style="font:15px/1.8 -apple-system,PingFang TC,sans-serif;padding:28px;max-width:560px">' +
+      '請用本機伺服器開啟這個檔案。<br>VS Code：在檔案上按右鍵 → Open with Live Server<br>' +
+      '或在終端機進到 _Q_Q 資料夾執行 <code>python3 -m http.server</code>，再打開 http://localhost:8000/</p>';
+  }
+</script>
+<script type="module">
+  import { mv } from './stage.js';
+
+  // 時間軸：at = 從第幾毫秒開始（對照 timecode.html），scene = scenes/ 裡的檔名，fade = 和上一段交疊淡出的毫秒數
+  // 開發時用 index.html?dev 顯示資訊，index.html?dev&from=60000 從 60 秒開始
+  mv([
+    { at: 0, scene: '_template' },
+    // { at: 29882, scene: 'rain', fade: 900 },
+  ]);
+</script>
+</body>
+</html>
