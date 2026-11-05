@@ -4,7 +4,7 @@
    index.html 會自動拿它當 MV 的開場：素材載入時顯示 Loading，載完變成 PLAY。
    直接打開 scenes/loading.html 可以單獨預覽（模擬載入，網址加 ?sim=8000 可以放慢）。
 
-   版面依 Figma「Group 1」：卡片 190 × 420，置中，依螢幕大小等比縮放。
+   版面依 Figma（Page 1，388 × 743 的畫面）：卡片 235 × 517，置中，依螢幕大小等比縮放。
    背景：五個顏色像 Apple Music 播放畫面那樣緩慢交融（WebGL）。
    ========================================================================== */
 
@@ -21,15 +21,15 @@ const CSS = `
 .ld-bg{position:absolute;inset:0;width:100%;height:100%;display:block}
 .ld.nogl{background:linear-gradient(160deg,#f8efce 0%,#ffc2b4 30%,#d2d6d3 55%,#ccebc8 78%,#ff8f8f 100%)}
 .ld.nogl .ld-bg{display:none}
-.ld-card{position:absolute;left:50%;top:50%;width:190px;height:420px;transform:translate(-50%,-50%) scale(var(--s,1));opacity:0;transition:opacity .9s ease}
+.ld-card{position:absolute;left:50%;top:50%;width:235px;height:517px;transform:translate(-50%,-50%) scale(var(--s,1));opacity:0;transition:opacity .9s ease}
 .ld.in .ld-card{opacity:1}
-.ld-cover{position:absolute;left:0;top:0;width:190px;height:190px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);object-fit:cover;display:block;background:#d2d6d3}
-.ld-title{position:absolute;left:0;top:209px;font:26px/34px "BIZ UDPMincho","Hiragino Mincho ProN","Songti TC",serif;color:#748180;white-space:nowrap}
-.ld-artist{position:absolute;right:0;top:211px;width:15px;font:15px/17px "Shippori Antique","PingFang TC",sans-serif;color:#748180;text-align:center}
-.ld-line{position:absolute;left:0;top:332px;width:190px;height:1px;background:#fff}
+.ld-cover{position:absolute;left:0;top:0;width:235px;height:235px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);object-fit:cover;display:block;background:#d2d6d3}
+.ld-title{position:absolute;left:-1px;top:251px;font:32px/42px "BIZ UDPMincho","Hiragino Mincho ProN","Songti TC",serif;color:#748180;white-space:nowrap}
+.ld-artist{position:absolute;right:0;top:259px;width:19px;font:19px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#748180;text-align:center}
+.ld-line{position:absolute;left:0;top:402px;width:235px;height:1px;background:#fff}
 .ld-line i{position:absolute;left:0;top:0;height:100%;width:0;background:#748180}
-.ld-cap{position:absolute;left:0;top:349px;width:190px;text-align:center;font:12px/17px "Roboto Slab",Georgia,serif;color:#748180;white-space:nowrap}
-.ld-btn{position:absolute;left:27px;top:382px;width:135px;height:38px;padding:0;border:0;border-radius:50px;background:#bfbfbf;color:#e5e5e5;font:22px/19px "Roboto Slab",Georgia,serif;cursor:default;transition:background-color .5s ease,opacity .3s ease;-webkit-tap-highlight-color:transparent;outline:none}
+.ld-cap{position:absolute;left:0;top:426px;width:235px;text-align:center;font:15px/21.048px "Roboto Slab",Georgia,serif;color:#748180;white-space:nowrap}
+.ld-btn{position:absolute;left:35px;top:470px;width:165px;height:47px;padding:0;border:0;border-radius:50px;background:#bfbfbf;color:#e5e5e5;font:28px/1 "Roboto Slab",Georgia,serif;cursor:default;transition:background-color .5s ease,opacity .3s ease;-webkit-tap-highlight-color:transparent;outline:none}
 .ld-btn span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transition:opacity .45s ease}
 .ld-btn .p{opacity:0}
 .ld.ready .ld-btn{background:#748180;cursor:pointer}
@@ -100,7 +100,7 @@ export default {
       // 進度線平滑前進
       this.shown += (this.target - this.shown) * (1 - Math.exp(-dt * 7));
       if (this.wantReady && this.target - this.shown < 0.004) this.shown = 1;
-      this.bar.style.width = (this.shown * 190).toFixed(2) + 'px';
+      this.bar.style.width = (this.shown * 100).toFixed(2) + '%';
       if (this.wantReady && this.shown >= 1 && !this.isReady) {
         this.isReady = true;
         this.btn.disabled = false;
