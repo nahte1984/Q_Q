@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>爆音測試</title>
+<style>
+html,body{margin:0;background:#f8efce;color:#748180;font-family:-apple-system,BlinkMacSystemFont,"PingFang TC",sans-serif;-webkit-tap-highlight-color:transparent}
+body{padding:28px 22px 40px;max-width:520px;margin:0 auto}
+h1{font-size:15px;font-weight:600;margin:0 0 4px;letter-spacing:.04em}
+.step{font:12px ui-monospace,Menlo,monospace;color:#9aa3a1;margin-bottom:22px}
+.mode{font-size:22px;line-height:1.4;margin:0 0 8px;color:#5f6a67}
+.desc{font-size:14px;line-height:1.7;margin:0 0 26px}
+button{font:inherit;font-size:17px;border:0;border-radius:999px;padding:14px 30px;background:#748180;color:#f3f0e6;cursor:pointer}
+button:disabled{opacity:.45}
+.status{font:13px ui-monospace,Menlo,monospace;margin:18px 0 26px;min-height:1.4em}
+.next{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.next a{font-size:14px;color:#5f6a67;border:1px solid #c9c3ad;border-radius:999px;padding:9px 16px;text-decoration:none}
+.next a.on{background:#748180;color:#f3f0e6;border-color:#748180}
+.info{margin-top:34px;font:11px/1.7 ui-monospace,Menlo,monospace;color:#9aa3a1;word-break:break-all}
+</style>
+</head>
+<body>
+<h1>爆音測試</h1>
+<div class="step" id="step"></div>
+<p class="mode" id="mode"></p>
+<p class="desc" id="desc"></p>
+<button id="go" disabled>載入中…</button>
+<div class="status" id="status"></div>
+<div>每一種測試都會重新整理頁面。請依序按，記下哪幾個有爆音：</div>
+<div class="next" id="next"></div>
+<div class="info" id="info"></div>
+
+<script>
+const MODES = {
+  a: { name: 'A　目前 MV 的做法', desc: 'Web Audio 播放，設成「播放」模式（靜音開關打開也有聲音），開頭淡入 0.15 秒。播 6 秒。' },
+  b: { name: 'B　不設定播放模式', desc: '和 A 一樣，但不設定「播放」模式。iPhone 的靜音開關打開時會沒聲音，測試時請先關掉靜音。播 6 秒。' },
+  c: { name: 'C　用 <audio> 播放', desc: '不用 Web Audio，改用網頁內建的音訊播放器播同一個檔案。播 6 秒。' },
+  d: { name: 'D　只啟動聲音，不播歌', desc: '和 A 一樣啟動聲音，但只播 3 秒完全的靜音。如果這個也會爆音，就是手機音訊一啟動就會響，跟歌無關。' },
+  e: { name: 'E　跳過歌的開頭', desc: '和 A 一樣，但從第 10 秒開始播。如果 A 有爆音、E 沒有，就是歌曲開頭解碼出了問題。播 6 秒。' },
+};
+const order = Object.keys(MODES);
+const q = new URLSearchParams(location.search);
+const mode = MODES[q.get('mode')] ? q.get('mode') : 'a';
+const $ = s => document.querySelector(s);
+$('#step').textContent = `測試 ${order.indexOf(mode) + 1} / ${order.length}`;
+$('#mode').textContent = MODES[mode].name;
+$('#desc').textContent = MODES[mode].desc;
+$('#next').innerHTML = order.map(k => `<a href="?mode=${k}" class="${k === mode ? 'on' : ''}">${k.toUpperCase()}</a>`).join('');
+const status = s => { $('#status').textContent = s; };
+
+// A、D、E：在建立聲音之前先設成「播放」模式
+if (mode !== 'b' && mode !== 'c') { try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {} }
+
+const AC = window.AudioContext || window.webkitAudioContext;
+const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+let buf = null, el = null;
+
+async function prepare() {
+  if (mode === 'c') {
+    el = new Audio('theSong.aac');
+    el.preload = 'auto';
+    el.playsInline = true;
+    await new Promise(r => { el.oncanplaythrough = r; el.onerror = r; setTimeout(r, 8000); el.load(); });
+  } else if (mode !== 'd') {
+    const ab = await (await fetch('theSong.aac')).arrayBuffer();
+    const oc = new OAC(2, 1, 48000);
+    buf = await new Promise((res, rej) => { const p = oc.decodeAudioData(ab, res, rej); if (p && p.then) p.then(res, rej); });
+  }
+  $('#go').disabled = false;
+  $('#go').textContent = '播放測試';
+}
+
+$('#go').addEventListener('click', async () => {
+  $('#go').disabled = true;
+  const t0 = performance.now();
+  if (mode === 'c') {
+    el.currentTime = 0;
+    await el.play().catch(e => status('播放失敗：' + e.message));
+    status('播放中…');
+    setTimeout(() => { el.pause(); status('結束。有爆音嗎？請按下一個測試'); }, 6000);
+    return;
+  }
+  const ctx = new AC();
+  await ctx.resume().catch(() => {});
+  const g = ctx.createGain();
+  g.connect(ctx.destination);
+  const s = ctx.createBufferSource();
+  if (mode === 'd') s.buffer = ctx.createBuffer(2, ctx.sampleRate * 3, ctx.sampleRate);
+  else s.buffer = buf;
+  s.connect(g);
+  const start = ctx.currentTime + 0.04;
+  g.gain.setValueAtTime(0, start);
+  g.gain.linearRampToValueAtTime(1, start + 0.15);
+  s.start(start, mode === 'e' ? 10 : 0);
+  const len = mode === 'd' ? 3 : 6;
+  g.gain.setTargetAtTime(0, start + len, 0.02);
+  s.stop(start + len + 0.15);
+  status('播放中…');
+  s.onended = () => status('結束。有爆音嗎？請按下一個測試');
+  $('#info').textContent += ` · context ${ctx.sampleRate} Hz · 輸出延遲 ${Math.round((ctx.outputLatency || ctx.baseLatency || 0) * 1000)} ms · 從點擊到開始 ${Math.round(performance.now() - t0)} ms`;
+});
+
+$('#info').textContent = navigator.userAgent + (navigator.audioSession ? ' · audioSession ✓' : ' · audioSession ✗');
+prepare().catch(e => { status('載入失敗：' + e.message); });
+</script>
+</body>
+</html>
