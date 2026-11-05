@@ -76,33 +76,59 @@ const shared = {
 
 /* ---------- 音樂時鐘 ---------- */
 const AC = window.AudioContext || window.webkitAudioContext;
+const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+// iPhone：先把聲音類型設成「播放」（靜音模式也有聲音）。
+// 一定要在建立 AudioContext 之前設，之後才改會讓系統重設音訊，發出「啪」一聲
+try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+
 const audio = {
-  ctx: new AC(),
-  buf: null, src: null, playing: false, pos: 0, startCtx: 0, startPos: 0, token: 0,
+  ctx: null, analyser: null,     // 在「點擊開始」的當下才建立（iPhone 需要，也避免爆音）
+  buf: null, src: null, gain: null, playing: false, pos: 0, startCtx: 0, startPos: 0, token: 0,
   get duration() { return this.buf ? this.buf.duration : 0; },
-  latency() { return this.ctx.outputLatency || this.ctx.baseLatency || 0; },
+  init() {
+    if (this.ctx) return;
+    this.ctx = new AC();
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 2048; this.analyser.smoothingTimeConstant = 0.75;
+    this.analyser.connect(this.ctx.destination);
+    shared.audioContext = this.ctx;
+  },
+  latency() { return this.ctx ? (this.ctx.outputLatency || this.ctx.baseLatency || 0) : 0; },
   // 耳朵實際聽到的位置（秒）
   now() {
     if (!this.playing) return this.pos;
     const raw = this.startPos + (this.ctx.currentTime - this.startCtx);
     return Math.min(this.duration, Math.max(this.startPos, raw - this.latency()));
   },
+  // 停止時用很短的淡出，避免波形被切斷發出「喀」聲
   _stop() {
     this.token++;
-    if (this.src) { try { this.src.stop(); } catch (e) {} try { this.src.disconnect(); } catch (e) {} this.src = null; }
+    if (this.src) {
+      const s = this.src, g = this.gain, t = this.ctx.currentTime;
+      try {
+        if (g.gain.cancelAndHoldAtTime) g.gain.cancelAndHoldAtTime(t); else g.gain.cancelScheduledValues(t);
+        g.gain.setTargetAtTime(0, t, 0.008);
+        s.stop(t + 0.05);
+      } catch (e) { try { s.stop(); } catch (_) {} }
+      s.onended = () => { try { s.disconnect(); g.disconnect(); } catch (e) {} };
+      this.src = null; this.gain = null;
+    }
     this.playing = false;
   },
-  play() {
-    if (!this.buf || this.playing) return;
+  // fadeIn：開頭淡入幾秒（預設 0.02，跳轉時不會有喀聲；MV 開始時用比較長的淡入）
+  play(fadeIn = 0.02) {
+    if (!this.buf || this.playing || !this.ctx) return;
     if (this.ctx.state !== 'running') this.ctx.resume();
     if (this.pos >= this.duration - 0.005) this.pos = 0;
     const my = ++this.token;
-    const s = this.ctx.createBufferSource();
-    s.buffer = this.buf; s.connect(analyser);
+    const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    s.buffer = this.buf; s.connect(g); g.connect(this.analyser);
     s.onended = () => { if (my === this.token) { this.playing = false; this.src = null; this.pos = this.duration; } };
-    this.startCtx = this.ctx.currentTime + 0.03; this.startPos = this.pos;
+    this.startCtx = this.ctx.currentTime + 0.04; this.startPos = this.pos;
+    g.gain.setValueAtTime(0, this.startCtx);
+    g.gain.linearRampToValueAtTime(1, this.startCtx + fadeIn);
     s.start(this.startCtx, this.pos);
-    this.src = s; this.playing = true;
+    this.src = s; this.gain = g; this.playing = true;
   },
   pause() { if (!this.playing) return; const t = this.now(); this._stop(); this.pos = t; },
   seek(t) {
@@ -113,10 +139,15 @@ const audio = {
     if (was) this.play();
   },
 };
-const analyser = audio.ctx.createAnalyser();
-analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.75;
-analyser.connect(audio.ctx.destination);
-shared.audioContext = audio.ctx;
+
+// 解碼用離線的 AudioContext，不用等點擊就能先解好
+function decodeSong(ab) {
+  const oc = new OAC(2, 1, 48000);
+  return new Promise((res, rej) => {
+    const p = oc.decodeAudioData(ab, res, rej);
+    if (p && p.then) p.then(res, rej);
+  });
+}
 
 /* ---------- 載入進度（依份量加權，歌曲依下載的位元組計算） ---------- */
 const progress = {
@@ -127,31 +158,42 @@ const progress = {
   value() { let a = 0, b = 0; for (const it of this.items) { a += it.w * it.f; b += it.w; } return b ? a / b : 0; },
 };
 
-async function loadSong() {
-  const it = progress.add(6);
+// 歌曲：下載佔 60%，解碼佔 40%（解碼在手機上要一兩秒，進度條會持續往前，不會先跑到底再乾等）
+let songPromise = null;
+function loadSong() { return songPromise || (songPromise = loadSongNow()); }
+async function loadSongNow() {
+  const it = progress.add(8);
+  let timer = null;
   try {
     const r = await fetch(SONG_URL);
     if (!r.ok) throw new Error(`載不到 theSong.aac（${r.status}）`);
     const total = +r.headers.get('content-length') || 0;
-    let ab;
-    if (r.body && r.body.getReader && total) {
+    let ab, got = 0;
+    if (r.body && r.body.getReader) {
       const reader = r.body.getReader(), chunks = [];
-      let got = 0;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         chunks.push(value); got += value.length;
-        progress.set(it, 0.85 * got / total);
+        progress.set(it, 0.6 * (total ? got / total : 1 - Math.exp(-got / 4e6)));
       }
       const u8 = new Uint8Array(got); let o = 0;
       for (const c of chunks) { u8.set(c, o); o += c.length; }
       ab = u8.buffer;
     } else {
-      ab = await r.arrayBuffer();
+      ab = await r.arrayBuffer(); got = ab.byteLength;
     }
-    progress.set(it, 0.9);
-    audio.buf = await audio.ctx.decodeAudioData(ab);
+    progress.set(it, 0.6);
+    // 解碼時間估計（依檔案大小），進度條慢慢往前，解完才走到底
+    const est = Math.min(4, Math.max(0.6, got / 32000 * 0.007));
+    const t0 = performance.now();
+    timer = setInterval(() => {
+      const k = (performance.now() - t0) / 1000 / est;
+      progress.set(it, 0.6 + 0.37 * (1 - Math.exp(-2.2 * k)));
+    }, 80);
+    audio.buf = await decodeSong(ab);
   } finally {
+    clearInterval(timer);
     progress.set(it, 1);
   }
 }
@@ -578,8 +620,8 @@ function frame(now) {
   lastNow = now;
   if (dt > 0) fps += (1 / dt - fps) * 0.05;
   if (started) {
-    analyser.getByteFrequencyData(shared.spectrum);
-    analyser.getByteTimeDomainData(shared.waveform);
+    audio.analyser.getByteFrequencyData(shared.spectrum);
+    audio.analyser.getByteTimeDomainData(shared.waveform);
     const wf = shared.waveform; let sum = 0;
     for (let i = 0; i < wf.length; i++) { const v = (wf[i] - 128) / 128; sum += v * v; }
     shared.level += (Math.min(1, Math.sqrt(sum / wf.length) * 2.5) - shared.level) * 0.35;
@@ -606,12 +648,13 @@ async function prepare(recs) {
   needMotion = recs.some(r => r.scene.needs && r.scene.needs.motion);
   ui.ready(start);
 }
+let launching = false;
 async function start() {
-  if (started) return;
-  started = true;
-  audio.ctx.resume();
-  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}  // iPhone 靜音模式也有聲音
-  const jobs = [];
+  if (started || launching) return;
+  launching = true;
+  // 以下幾件事都要在點擊的當下（還沒 await 之前）發出，iPhone 才會允許
+  audio.init();
+  const jobs = [audio.ctx.resume().catch(() => {})];
   if (needMotion) jobs.push(requestMotion());
   if (needCamera) { ui.message('開啟相機…'); jobs.push(openCamera()); }
   ui.starting();
@@ -619,7 +662,8 @@ async function start() {
   for (const r of allRecs) { try { await call(r, 'ready'); } catch (err) { report(r, 'ready', err); } }
   director.exitAll();
   audio.seek(director.home);
-  audio.play();
+  audio.play(0.15);   // MV 開始：淡入 0.15 秒，避免剛開聲音時的爆音
+  started = true;
   hud.syncButtons();
   ui.hide();
 }
@@ -647,6 +691,7 @@ export async function solo(opts = {}) {
   ui.base();
   const scene = (await importModule(url)) || placeholder(url);
   if (scene.type === 'loading') return previewLoading(scene, url);
+  loadSong();   // 先開始下載歌曲
   const dv = scene.dev || {};
   const from = num('from') ?? dv.from ?? 0;
   const to = num('to') ?? dv.to ?? null;
@@ -702,6 +747,7 @@ function previewLoading(mod, url) {
 export async function mv(timeline, opts = {}) {
   devMode = params.has('dev');
   ui.base();
+  loadSong();   // 一打開就開始下載歌曲，和其他載入同時進行
   const ls = await importModule(new URL(`scenes/${opts.loading || 'loading'}.js`, location.href).href);
   if (ls && ls.mount) startScreen = ls;
   const loadingUrl = new URL(`scenes/${opts.loading || 'loading'}.js`, location.href).href;
