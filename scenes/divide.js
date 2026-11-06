@@ -2,7 +2,7 @@
    divide — 九宮格鏡頭，九種 grainrad 效果拼成一個完整的畫面
    --------------------------------------------------------------------------
    29800 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
-              點畫面：九個格子隨機換位子。
+              點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）。
               前鏡頭畫面鋪滿整個九宮格（像 object-fit: cover），每一格只露出自己那一塊，
               再各自套一種 grainrad 的效果；九格拼起來就是原本完整的鏡頭畫面（格子之間的縫會蓋掉一點）。
    版面：      格子和格子、格子和瀏覽器邊界都距離 5px，九宮格放到最大，直到碰到畫面的寬或高；
@@ -28,7 +28,8 @@ const INTRO = 1300;                      // 整個進場（毫秒）
 const CARD_FADE = 500;                   // 每一格淡入花多久（毫秒）；九格的開始時間平均分散在剩下的時間裡
 
 /* ---------- 點畫面：九個格子隨機換位子 ---------- */
-const SHUFFLE_MS = 700;                  // 換位子的動畫（毫秒）
+const TAP_FADE = 200;                    // 每一格重新淡入花多久（毫秒）
+const TAP_SPREAD = 200;                  // 九格的淡入開始時間在這段時間裡隨機錯開（毫秒；0 = 九格一起淡入）
 const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
                                          // false：只有效果換位子，畫面還是完整的
 
@@ -68,7 +69,6 @@ const con = v => { const c = v / 100; return (1 + c) / (1 - c * 0.99); };
 
 const clamp01 = x => Math.max(0, Math.min(1, x));
 const smooth = x => x * x * (3 - 2 * x);
-const easeInOut = x => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
 const shuffled = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const HOME = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
@@ -93,30 +93,20 @@ export default {
   reset() {
     this.order = shuffled(HOME);          // 淡入的順序
     this.slot = HOME.slice();             // 第 c 格（第 c 種效果）現在在哪個位置
-    this.from = HOME.map(slotXY);         // 換位子動畫的起點
-    this.moveAt = -Infinity;
+    this.tapOrder = HOME.slice();         // 換位子後重新淡入的順序
+    this.tapAt = -Infinity;
   },
 
   enter() { this.active = true; this.reset(); },
   exit() { this.active = false; },
 
-  // 每一格現在的位置（以格子為單位：x = 第幾欄、y = 第幾列，移動中會有小數）
-  positions(now) {
-    const k = easeInOut(clamp01((now - this.moveAt) / SHUFFLE_MS));
-    return this.slot.map((s, c) => {
-      const a = this.from[c], b = slotXY(s);
-      return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
-    });
-  },
-
-  // 換位子：每一格都換到別的位置（從現在的位置出發，動畫中再點也可以）
+  // 換位子：每一格都直接跳到別的位置，再迅速重新淡入（淡入中再點也可以）
   shuffle() {
-    const now = performance.now();
-    this.from = this.positions(now);
     let next;
     do next = shuffled(HOME); while (next.some((s, c) => s === this.slot[c]));
     this.slot = next;
-    this.moveAt = now;
+    this.tapOrder = shuffled(HOME);
+    this.tapAt = performance.now();
   },
 
   // 九宮格在畫面上的位置：四周和格子之間都留 GAP，格子放到最大（寬或高先碰到邊界為止），置中
@@ -132,13 +122,15 @@ export default {
     if (!this.gl) return;
     const L = this.layout(stage), sx = L.cw + GAP, sy = L.ch + GAP;
     const t = f ? f.local * 1000 : INTRO;          // 進場進度（毫秒，照音樂時間）
-    const pos = this.positions(performance.now());
+    const sinceTap = performance.now() - this.tapAt;
     const cards = [];
     for (let c = 0; c < 9; c++) {
       const start = this.order.indexOf(c) * (INTRO - CARD_FADE) / 8;
-      const a = smooth(clamp01((t - start) / CARD_FADE));
+      const tapStart = this.tapOrder.indexOf(c) * TAP_SPREAD / 8;
+      const a = smooth(clamp01((t - start) / CARD_FADE)) * smooth(clamp01((sinceTap - tapStart) / TAP_FADE));
       if (a <= 0) continue;
-      const x = pos[c].x * sx, y = pos[c].y * sy;   // 相對九宮格左上角
+      const p = slotXY(this.slot[c]);
+      const x = p.x * sx, y = p.y * sy;             // 相對九宮格左上角
       const home = slotXY(c);
       cards.push({
         fx: c, a, x: L.x + x, y: L.y + y,
