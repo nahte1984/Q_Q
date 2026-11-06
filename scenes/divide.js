@@ -3,7 +3,8 @@
    --------------------------------------------------------------------------
    29800 ms   rain 整個畫面縮小進中間那一格，九宮格出現。
               每一格用 grainrad 的一種字符組（Character Set）把前鏡頭畫面轉成 ASCII。
-              版面依 Figma「Frame 4」（388 × 743）：格子 108 × 170、間距 15、圓角 8。
+              格子和格子、格子和瀏覽器邊界都距離 15px，九宮格放到最大，直到碰到畫面的寬或高；
+              格子比例照 Figma「Frame 4」（108 × 170），字跟著格子一起放大。
 
    演算法和 grainrad 的 ASCII 一樣：把畫面切成字元大小的格子，取每格的平均亮度，
    亮度 0–1 平均分配到字符組裡的字（越亮用越後面的字），字用米色、底用粉紅色。
@@ -24,16 +25,16 @@ const CHARSETS = [
   { name: 'SYMBOLS',    chars: ' ·•○◎●◐◑◒◓◔◕◖◗' },
 ];
 const FONT = '"Share Tech Mono"';        // grainrad 用的等寬字（字型裡沒有的符號會用系統字型補）
-const CHAR_H = 9;                        // 字元格子的高度（px，以 Figma 版面計）；寬度是高度的 0.6 倍
+const CHAR_H = 9;                        // 字元格子的高度（以 Figma 108px 寬的格子計，格子放大時字跟著放大）；寬度是高度的 0.6 倍
 const CHAR_COLOR = '#f8efce';            // 字
 const CARD_COLOR = '#da8a8a';            // 格子的底
 const BG_COLOR = '#313131';              // 格子外面
 const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;   // 格子上的顆粒（和 rain 的鏡頭一樣；不要顆粒就把 GRAIN_AMOUNT 改成 0）
 
-// Figma 版面
-const FRAME_W = 388, FRAME_H = 743;
-const CARD_W = 108, CARD_H = 170, GAP = 15, RADIUS = 8;
-const GRID_W = CARD_W * 3 + GAP * 2, GRID_H = CARD_H * 3 + GAP * 2;
+// 版面
+const CARD_W = 108, CARD_H = 170;        // 格子比例（Figma）
+const GAP = 15;                          // 格子之間、格子和瀏覽器邊界的距離（px）
+const RADIUS = 8;                        // 圓角（px）
 
 /* ---------- 字元圖集：每種字符組一列 ---------- */
 const GLYPH_W = 30, GLYPH_H = 50;        // 圖集裡每個字的格子（像素，寬:高 = 0.6）
@@ -55,17 +56,18 @@ export default {
     else this.gl.draw(null, this.layout(stage));   // 暖機
   },
 
-  // 九宮格在畫面上的位置（依螢幕大小等比縮放、置中）
+  // 九宮格在畫面上的位置：四周和格子之間都留 GAP，格子放到最大（寬或高先碰到邊界為止），置中
   layout(stage) {
     const W = stage.width, H = stage.height;
-    const s = Math.min(W / FRAME_W, H / FRAME_H);
-    return { W, s, x: (W - GRID_W * s) / 2, y: (H - GRID_H * s) / 2 };
+    const cw = Math.max(1, Math.min((W - GAP * 4) / 3, (H - GAP * 4) / 3 * CARD_W / CARD_H));
+    const ch = cw * CARD_H / CARD_W;
+    return { W, cw, ch, s: cw / CARD_W, x: (W - cw * 3 - GAP * 2) / 2, y: (H - ch * 3 - GAP * 2) / 2 };
   },
 
   // 縮小轉場：上一段縮進中間那一格
   transitionTarget(stage) {
     const L = this.layout(stage);
-    return { x: L.x + (CARD_W + GAP) * L.s, y: L.y + (CARD_H + GAP) * L.s, w: CARD_W * L.s, h: CARD_H * L.s, r: RADIUS * L.s };
+    return { x: L.x + L.cw + GAP, y: L.y + L.ch + GAP, w: L.cw, h: L.ch, r: RADIUS };
   },
 
   update(stage) {
@@ -220,16 +222,15 @@ void main(){
         V = vw / vh;
       }
       const Wd = canvas.width, Hd = canvas.height, d = Wd / L.W;   // d：每個 CSS px 有幾個像素
-      const s = L.s * d;
       const A = CARD_W / CARD_H;
       gl.viewport(0, 0, Wd, Hd);
       gl.uniform1f(U.uHasCam, video ? 1 : 0);
       gl.uniform2f(U.uRes, Wd, Hd);
       gl.uniform2f(U.uOrigin, L.x * d, L.y * d);
-      gl.uniform2f(U.uCard, CARD_W * s, CARD_H * s);
-      gl.uniform2f(U.uChar, CHAR_H * 0.6 * s, CHAR_H * s);
-      gl.uniform1f(U.uGap, GAP * s);
-      gl.uniform1f(U.uRadius, RADIUS * s);
+      gl.uniform2f(U.uCard, L.cw * d, L.ch * d);
+      gl.uniform2f(U.uChar, CHAR_H * 0.6 * L.s * d, CHAR_H * L.s * d);
+      gl.uniform1f(U.uGap, GAP * d);
+      gl.uniform1f(U.uRadius, RADIUS * d);
       gl.uniform2f(U.uCamScale, A > V ? 1 : A / V, A > V ? V / A : 1);
       gl.uniform2f(U.uSeed, Math.random() * 1000, Math.random() * 1000);
       gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
