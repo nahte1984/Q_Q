@@ -2,7 +2,7 @@
    rain — 符號雨
    --------------------------------------------------------------------------
    0 ms        按下 PLAY，介面淡出、背景的色彩交融留著，開始下白色的符號雨
-   8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（彩度 -30%、壓 40% 黑），1 小節後完全出現；
+   8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（彩度 -30%、壓 40% 黑），2 小節後完全出現；
                之後落下的符號有顏色（從紫色開始繞色相環），碰到頭會彈開
    16000 ms    「每個人都是一種文體」拆成一個一個白色的字，打散混在符號裡落下
    19000 ms    「你覺得你是哪一種」拆成一個一個白色的字，打散混在符號裡落下
@@ -20,7 +20,7 @@ const SIZE_MIN = 12, SIZE_MAX = 38;      // 符號大小（px）；大部分偏�
 const SIZE_CURVE = 1.8;                  // 越大，小符號越多
 
 const PHRASE_FONT = '"Shippori Antique"';
-const CHAR_SIZE_MIN = 46, CHAR_SIZE_MAX = 60;   // 句子拆開後每個字的大小（px，比符號大）
+const CHAR_SIZE_MIN = 40, CHAR_SIZE_MAX = 50;   // 句子拆開後每個字的大小（px，比符號大）
 const CHAR_COLOR = '#fff';                       // 句子的字一律白色
 const CHAR_SPREAD = 260;                 // 每個字出發時上下錯開的距離（px），讓它們不會排成一排
 const PHRASES = [
@@ -30,15 +30,18 @@ const PHRASES = [
 
 const COLOR_AT = 8389;                   // 第 4 小節第 1 拍：開始有顏色、碰到頭會彈開
 const CAMERA_AT = 8389;                  // 鏡頭從這裡開始淡入
-const CAMERA_FADE = 1791;                // 淡入花多久（1 小節）
+const CAMERA_FADE = 3582;                // 淡入花多久（2 小節）
 const CAMERA_SATURATION = 0.7;           // 彩度降低 30%
 const CAMERA_DARK = 0.4;                 // 壓 40% 的黑
 const HUE_START = 270;                   // 從紫色開始
 const HUE_CYCLE = 15000;                 // 繞色相環一圈的毫秒數（和 purpleRain 一樣）
 
-const SPAWN_PER_SEC = w => 15 + w * 0.085;  // 每秒落下幾個（畫面越寬越多）
-const FALL_MIN = 170, FALL_MAX = 420;       // 落下速度（px/秒）
-const GRAVITY = 1080;                       // 彈開後的重力
+// 整體速度：1 = 原本，0.5 = 慢一半。落下、飄移、彈開、旋轉都一起變慢，像慢動作
+const SPEED = 0.5;
+// 每秒落下幾個（畫面越寬越多）。會跟著速度調整，所以畫面上同時的數量不會因為變慢而變多
+const SPAWN_PER_SEC = w => (15 + w * 0.085) * SPEED;
+const FALL_MIN = 170 * SPEED, FALL_MAX = 420 * SPEED;   // 落下速度（px/秒）
+const GRAVITY = 1080 * SPEED * SPEED;                   // 彈開後的重力
 
 const MODEL_URL = '../models/blazeface/model.json';   // 臉部偵測模型（從 purpleRain 搬來）
 
@@ -140,7 +143,7 @@ export default {
     // 鏡頭淡入
     const hasCam = !!this.video.srcObject && this.video.videoWidth > 0;
     const camA = hasCam ? clamp01((ms - CAMERA_AT) / CAMERA_FADE) : 0;
-    if (Math.abs(camA - this.lastCamA) > 0.002) {
+    if (camA !== this.lastCamA && (Math.abs(camA - this.lastCamA) > 0.002 || camA === 0 || camA === 1)) {
       this.video.style.opacity = camA.toFixed(3);
       this.dark.style.opacity = (camA * CAMERA_DARK).toFixed(3);
       this.lastCamA = camA;
@@ -172,7 +175,7 @@ export default {
       const p = drops[i];
       if (dt > 0) {
         if (!p.bouncing) {
-          p.vy += (Math.random() - 0.5) * 360 * dt;
+          p.vy += (Math.random() - 0.5) * 360 * SPEED * dt;
           p.vy = Math.min(FALL_MAX * 1.15, Math.max(FALL_MIN * 0.8, p.vy));
           for (let k = 0; k < faces.length; k++) {
             const b = faces[k], dx = p.x - b.cx, dy = p.y - b.cy;
@@ -180,8 +183,8 @@ export default {
               const side = dx > 0 ? 1 : -1;
               p.bouncing = true;
               p.vy = -p.vy * (0.2 + Math.random() * 0.3);
-              p.vx = side * (60 + Math.random() * 180);
-              p.vr = side * (3 + Math.random() * 5);
+              p.vx = side * (60 + Math.random() * 180) * SPEED;
+              p.vr = side * (3 + Math.random() * 5) * SPEED;
               p.y = b.cy - b.ry * Math.sqrt(Math.max(0, 1 - (dx * dx) / (b.rx * b.rx))) - 2;
               break;
             }
@@ -218,9 +221,9 @@ function newSymbol(W, ms) {
   const big = (size - SIZE_MIN) / (SIZE_MAX - SIZE_MIN);
   return {
     x: Math.random() * W, y: -size,
-    vx: (Math.random() - 0.5) * 90,
+    vx: (Math.random() - 0.5) * 90 * SPEED,
     vy: (FALL_MIN + Math.random() * (FALL_MAX - FALL_MIN)) * (0.85 + big * 0.3),   // 大的稍快，有一點遠近感
-    rot: (Math.random() - 0.5) * 0.6, vr: (Math.random() - 0.5) * 0.8,
+    rot: (Math.random() - 0.5) * 0.6, vr: (Math.random() - 0.5) * 0.8 * SPEED,
     size, col: PICK[(Math.random() * PICK.length) | 0],
     row: ms >= COLOR_AT ? 1 + hueIndex(ms) : 0,        // 第 0 列是白色
     bouncing: false,
@@ -231,9 +234,9 @@ function newChar(W, sprite) {
   const size = CHAR_SIZE_MIN + Math.random() * (CHAR_SIZE_MAX - CHAR_SIZE_MIN);
   return {
     x: size / 2 + Math.random() * Math.max(0, W - size), y: -size - Math.random() * CHAR_SPREAD,
-    vx: (Math.random() - 0.5) * 90,
+    vx: (Math.random() - 0.5) * 90 * SPEED,
     vy: FALL_MIN + Math.random() * (FALL_MAX - FALL_MIN),
-    rot: (Math.random() - 0.5) * 0.6, vr: (Math.random() - 0.5) * 0.8,
+    rot: (Math.random() - 0.5) * 0.6, vr: (Math.random() - 0.5) * 0.8 * SPEED,
     size, sprite, bouncing: false,
   };
 }
