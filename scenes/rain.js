@@ -2,7 +2,7 @@
    rain — 符號雨
    --------------------------------------------------------------------------
    0 ms        按下 PLAY，介面淡出、背景的色彩交融留著，開始下白色的符號雨
-   8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（彩度 -30%、壓 40% 黑），2 小節後完全出現；
+   8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（彩度 -30%、壓 40% 黑、加細顆粒），2 小節後完全出現；
                之後落下的符號有顏色（從紫色開始繞色相環），碰到頭會彈開
    16000 ms    「每個人都是一種文體」拆成一個一個白色的字，打散混在符號裡落下
    19000 ms    「你覺得你是哪一種」拆成一個一個白色的字，打散混在符號裡落下
@@ -34,6 +34,9 @@ const CAMERA_AT = 8389;                  // 鏡頭從這裡開始淡入
 const CAMERA_FADE = 3582;                // 淡入花多久（2 小節）
 const CAMERA_SATURATION = 0.7;           // 彩度降低 30%
 const CAMERA_DARK = 0.4;                 // 壓 40% 的黑
+// 鏡頭的顆粒：參考 grainrad 的 Grain（預設大小 2、強度 35），這裡顆粒細一半、強度弱一半。每一幀都會變
+const GRAIN_SIZE = 0.5;                  // 顆粒大小（px）；grainrad 預設約 1px
+const GRAIN_AMOUNT = 0.175;              // 強度：每顆亮度最多加減這個值的一半（grainrad 預設 0.35）
 const HUE_START = 270;                   // 從紫色開始
 const HUE_CYCLE = 15000;                 // 繞色相環一圈的毫秒數（和 purpleRain 一樣）
 
@@ -75,17 +78,11 @@ export default {
     this.bg = colorBlend(bg, COLORS);
     if (!this.bg) bg.style.background = '#f8efce';
 
-    // 2. 鏡頭（彩度 -30%、左右鏡像）和 30% 黑
-    const v = document.createElement('video');
-    v.muted = true; v.playsInline = true; v.autoplay = true; v.setAttribute('playsinline', '');
-    v.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);` +
-      `filter:saturate(${CAMERA_SATURATION});-webkit-filter:saturate(${CAMERA_SATURATION});opacity:0;pointer-events:none`;
-    root.appendChild(v);
-    this.video = v;
-    const dark = document.createElement('div');
-    dark.style.cssText = 'position:absolute;inset:0;background:#000;opacity:0;pointer-events:none';
-    root.appendChild(dark);
-    this.dark = dark;
+    // 2. 鏡頭：用 WebGL 畫（左右鏡像、彩度 -30%、壓 40% 黑、加顆粒），用手機原本的解析度，顆粒才夠細
+    this.camCanvas = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
+    this.camCanvas.style.opacity = 0;
+    this.cam = cameraLayer(this.camCanvas);
+    if (!this.cam) console.warn('這個瀏覽器不支援 WebGL，鏡頭畫面不會出現');
 
     // 3. 符號雨
     this.canvas = stage.canvas();
@@ -108,27 +105,17 @@ export default {
     this.lastCamA = -1;
   },
 
-  ready(stage) {
-    // 用共用的相機串流（點擊開始時已經開好）
-    if (stage.camera && stage.camera.srcObject) {
-      this.video.srcObject = stage.camera.srcObject;
-      this.video.play().catch(() => {});
-    }
-  },
-
   enter(stage, f) {
     this.drops = [];
     this.acc = 0;
     this.lastMs = f.t * 1000;
     this.done = PHRASES.map(p => this.lastMs > p.at + 300);   // 從中途進場時，已經過了的句子就不補
-    if (this.video.srcObject) this.video.play().catch(() => {});
   },
 
   exit() {
     this.drops = [];
     this.faces = [];
-    this.video.style.opacity = 0;
-    this.dark.style.opacity = 0;
+    this.camCanvas.style.opacity = 0;
     this.lastCamA = -1;
   },
 
@@ -141,20 +128,21 @@ export default {
     if (ms < this.lastMs - 500) this.done = PHRASES.map(p => ms > p.at + 300);
     this.lastMs = ms;
 
-    // 鏡頭淡入
-    const hasCam = !!this.video.srcObject && this.video.videoWidth > 0;
+    // 鏡頭淡入（共用的相機，點擊開始時已經開好）
+    const video = stage.camera;
+    const hasCam = !!(this.cam && video && video.videoWidth > 0);
     const camA = hasCam ? clamp01((ms - CAMERA_AT) / CAMERA_FADE) : 0;
     if (camA !== this.lastCamA && (Math.abs(camA - this.lastCamA) > 0.002 || camA === 0 || camA === 1)) {
-      this.video.style.opacity = camA.toFixed(3);
-      this.dark.style.opacity = (camA * CAMERA_DARK).toFixed(3);
+      this.camCanvas.style.opacity = camA.toFixed(3);
       this.lastCamA = camA;
     }
+    if (camA > 0) this.cam.draw(video);
     // 背景：鏡頭完全蓋住之後就不用再畫
     if (camA < 1 && this.bg) this.bg.draw(performance.now() / 1000);
 
     // 臉部偵測（鏡頭出現之後才開始）
-    if (camA > 0 && hasCam) this.detector.send(stage.camera || this.video);
-    const faces = camA > 0.3 ? this.faces.map(b => toScreen(b, this.video, W, H)) : [];
+    if (camA > 0) this.detector.send(video);
+    const faces = camA > 0.3 ? this.faces.map(b => toScreen(b, video, W, H)) : [];
 
     // 新的符號
     if (dt > 0) {
@@ -285,6 +273,93 @@ function bakeChar(ch, color) {
   const a = m.actualBoundingBoxAscent ?? CHAR_BAKE * 0.85, de = m.actualBoundingBoxDescent ?? CHAR_BAKE * 0.15;
   g.fillText(ch, (box - (l + r)) / 2 + l, (box - (a + de)) / 2 + a);   // 用字實際的形狀置中
   return c;
+}
+
+/* ---------- 鏡頭畫面：WebGL（左右鏡像、cover 鋪滿、彩度、壓黑、顆粒） ---------- */
+function cameraLayer(canvas) {
+  const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: false, stencil: false });
+  if (!gl) return null;
+  const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
+  const fs = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform sampler2D uTex;
+uniform vec2 uRes, uScale, uSeed;
+uniform float uSat, uDark, uGrain, uGrainPx;
+// 不用 sin 的雜訊（手機上也不會出現規則的紋路）
+float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 t = (uv - 0.5) * uScale + 0.5;            // 像 object-fit: cover 一樣鋪滿
+  t = vec2(1.0 - t.x, 1.0 - t.y);                // 左右鏡像；影片第一列在畫面上方
+  vec3 c = texture2D(uTex, t).rgb;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(vec3(l), c, uSat) * (1.0 - uDark);     // 彩度、壓黑
+  float n = hash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5;
+  gl_FragColor = vec4(c + n * uGrain, 1.0);      // 顆粒：像 grainrad 一樣直接加減亮度
+}`;
+  const sh = (type, src) => {
+    const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+    if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+    return o;
+  };
+  let prog;
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch (err) { console.warn('鏡頭 shader 失敗', err); return null; }
+  gl.useProgram(prog);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'p');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  const u = n => gl.getUniformLocation(prog, n);
+  const U = { res: u('uRes'), scale: u('uScale'), seed: u('uSeed'), sat: u('uSat'), dark: u('uDark'), grain: u('uGrain'), px: u('uGrainPx') };
+  gl.uniform1i(u('uTex'), 0);
+  gl.uniform1f(U.sat, CAMERA_SATURATION);
+  gl.uniform1f(U.dark, CAMERA_DARK);
+  gl.uniform1f(U.grain, GRAIN_AMOUNT);
+
+  let texW = 0, texH = 0, fresh = true, watching = null;
+  // 只在鏡頭有新畫面時才上傳（鏡頭通常 30fps，畫面 60fps）
+  const watch = v => {
+    if (watching === v || !v.requestVideoFrameCallback) return;
+    watching = v;
+    const cb = () => { fresh = true; v.requestVideoFrameCallback(cb); };
+    v.requestVideoFrameCallback(cb);
+  };
+  return {
+    draw(video) {
+      if (gl.isContextLost()) return;
+      watch(video);
+      const vw = video.videoWidth, vh = video.videoHeight;
+      if (fresh || !video.requestVideoFrameCallback) {
+        if (vw !== texW || vh !== texH) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video); texW = vw; texH = vh; }
+        else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGB, gl.UNSIGNED_BYTE, video);
+        fresh = false;
+      }
+      const W = canvas.width, H = canvas.height, A = W / H, V = vw / vh;
+      gl.viewport(0, 0, W, H);
+      gl.uniform2f(U.res, W, H);
+      gl.uniform2f(U.scale, A > V ? 1 : A / V, A > V ? V / A : 1);
+      gl.uniform2f(U.seed, Math.random() * 1000, Math.random() * 1000);   // 每一幀的顆粒都不一樣
+      gl.uniform1f(U.px, Math.max(1, GRAIN_SIZE * W / (canvas.clientWidth || W)));
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+  };
 }
 
 /* ---------- 臉部偵測（Blazeface，在背景執行緒，和 purpleRain 同一套） ---------- */
