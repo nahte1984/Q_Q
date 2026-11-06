@@ -581,23 +581,6 @@ function requestMotion() {
   return Promise.allSettled(jobs).then(listenMotion);
 }
 
-/* ---------- 縮小轉場：上一段的整個畫面從全螢幕縮進 rect（下一段指定的格子） ----------
-   畫面以「蓋滿」的方式縮進格子，格子外的部分裁掉；縮小的過程完全不透明，
-   縮到格子大小之後，如果有設定 fadeOut，再淡出露出下一段的那一格 */
-const easeInOut = x => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
-function shrinkTo(root, R, k) {
-  const W = shared.width, H = shared.height, e = easeInOut(clamp01(k));
-  const x = R.x * e, y = R.y * e, w = W + (R.w - W) * e, h = H + (R.h - H) * e;   // 這一刻要顯示的區域（畫面座標）
-  const S = Math.max(w / W, h / H);
-  const tx = x + w / 2 - W * S / 2, ty = y + h / 2 - H * S / 2;
-  const lx = (x - tx) / S, ly = (y - ty) / S, lw = w / S, lh = h / S;               // 換回縮放前的座標來裁切
-  const r = ((R.r || 0) * e) / S;
-  root.style.transformOrigin = '0 0';
-  root.style.transform = `translate(${tx.toFixed(2)}px,${ty.toFixed(2)}px) scale(${S.toFixed(5)})`;
-  const clip = `inset(${ly.toFixed(2)}px ${(W - lx - lw).toFixed(2)}px ${(H - ly - lh).toFixed(2)}px ${lx.toFixed(2)}px round ${r.toFixed(2)}px)`;
-  root.style.clipPath = clip; root.style.webkitClipPath = clip;
-}
-
 /* ---------- 導演：依音樂時間決定誰上場 ---------- */
 const director = {
   entries: [], cur: -1, fading: [], solo: false, loop: false, home: 0,
@@ -618,7 +601,6 @@ const director = {
   doExit(e) {
     const r = e.rec, root = r.st.root;
     root.classList.remove('on'); root.style.opacity = ''; root.style.zIndex = ''; root.style.pointerEvents = '';
-    root.style.transform = ''; root.style.transformOrigin = ''; root.style.clipPath = ''; root.style.webkitClipPath = '';
     if (r.active) { r.active = false; call(r, 'exit'); }
   },
   exitAll() {
@@ -639,19 +621,13 @@ const director = {
     const i = this.indexAt(t);
     if (i !== this.cur) {
       const prev = this.entries[this.cur], next = this.entries[i];
-      const sequential = prev && next && i === this.cur + 1 && t - next.at < 0.25;
+      const sequential = prev && next && i === this.cur + 1 && t - next.at < 1;   // 1 秒內算是正常播到這裡（中間卡一下也照樣轉場）
       if (!sequential) { this.exitAll(); if (next) this.doEnter(next, t, base); }
       else if (prev.rec !== next.rec) {
         if (next.dur > 0 && next.transition !== 'cut') {
           this.doEnter(next, t, base);
-          // 縮小轉場：問下一段要縮進哪裡（沒有提供就縮到畫面中間三分之一）
-          let rect = null;
-          if (next.transition === 'shrink') {
-            rect = call(next.rec, 'transitionTarget') ||
-              { x: shared.width / 3, y: shared.height / 3, w: shared.width / 3, h: shared.height / 3, r: 0 };
-          }
-          this.fading.push({ e: prev, start: next.at, dur: next.dur, out: next.fadeOut, type: next.transition, rect });
-          prev.rec.st.root.style.zIndex = '2';
+          this.fading.push({ e: prev, start: next.at, dur: next.dur, type: next.transition });
+          prev.rec.st.root.style.zIndex = next.transition === 'over' ? '0' : '2';   // over：下一段疊在上面
           prev.rec.st.root.style.pointerEvents = 'none';   // 轉場中的上一段不擋住下一段的互動
         } else {
           this.doExit(prev);
@@ -662,13 +638,9 @@ const director = {
     }
     // 轉場中的上一段：照音樂時間計算，暫停或跳轉都不會亂
     this.fading = this.fading.filter(fd => {
-      const u = t - fd.start, out = fd.type === 'shrink' ? fd.out : 0;
-      if (u < 0 || u >= fd.dur + out) { this.doExit(fd.e); return false; }
-      const root = fd.e.rec.st.root;
-      if (fd.type === 'shrink') {
-        shrinkTo(root, fd.rect, u / fd.dur);
-        root.style.opacity = u > fd.dur ? String(1 - (u - fd.dur) / out) : '1';   // 縮完之後才淡出
-      } else root.style.opacity = String(1 - u / fd.dur);
+      const u = t - fd.start;
+      if (u < 0 || u >= fd.dur) { this.doExit(fd.e); return false; }
+      if (fd.type !== 'over') fd.e.rec.st.root.style.opacity = String(1 - u / fd.dur);   // over：上一段保持原樣，由下一段自己蓋過去
       return true;
     });
     for (const fd of this.fading) call(fd.e.rec, 'update', this.frameFor(fd.e, t, base));
@@ -893,10 +865,9 @@ function previewLoading(mod, url) {
 
 /* ==========================================================================
    mv(timeline)：組裝整支 MV
-   timeline: [{ at: 毫秒, scene: 'scenes/ 裡的檔名（不含 .js）', transition: 'fade' | 'shrink', dur: 轉場毫秒 }, ...]
+   timeline: [{ at: 毫秒, scene: 'scenes/ 裡的檔名（不含 .js）', transition: 'fade' | 'over', dur: 轉場毫秒 }, ...]
    ・fade：上一段淡出（舊寫法 fade: 900 也可以）
-   ・shrink：上一段整個畫面縮小進下一段指定的格子（下一段要提供 transitionTarget(stage)，回傳 {x, y, w, h, r}）
-     dur = 縮小的毫秒數；fadeOut = 縮完之後再淡出的毫秒數（不寫就是縮完直接消失）
+   ・over：下一段疊在上一段上面，自己做進場（例如 divide 的格子一格一格淡入）；上一段保持原樣，dur 毫秒之後才消失
    ・不寫就是直接切換
    opts.loading: 載入畫面的檔名（預設 'loading'，也就是 scenes/loading.js）
    ========================================================================== */
@@ -920,10 +891,9 @@ export async function mv(timeline, opts = {}) {
     at: e.at / 1000,
     end: i + 1 < sorted.length ? sorted[i + 1].at / 1000 : null,
     rec: recs[e.scene], name: e.scene,
-    // 轉場：fade（淡出，舊寫法 fade: 毫秒也可以）、shrink（縮小進下一段指定的格子）、cut（直接切）
+    // 轉場：fade（上一段淡出，舊寫法 fade: 毫秒也可以）、over（下一段疊在上面自己做進場）、cut（直接切）
     transition: e.transition || (e.fade ? 'fade' : 'cut'),
     dur: (e.dur ?? e.fade ?? 0) / 1000,
-    fadeOut: (e.fadeOut ?? 0) / 1000,
   }));
   director.home = (num('from') ?? 0) / 1000;
   hud.enabled = devMode;
