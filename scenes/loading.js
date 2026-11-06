@@ -19,6 +19,13 @@ const BLEND_OFFSET = Math.random() * 200;
 const SPEED = 1;
 // 封面（相對於這個檔）
 const COVER = '../images/cover.webp';
+// 進度線下面那行字
+const CAPTION = 'Interactive Experience (BETA)';
+// 標題「每個人都是一種文體」：卡片出現時，九個字用隨機的順序一個一個快速淡入
+const TITLE_LINES = ['每個人', '都是', '一種文體'];
+const TITLE_CHAR_FADE = 1300;             // 每個字淡入多久（毫秒）
+const TITLE_CHAR_GAP = 70;               // 字和字開始淡入的間隔（毫秒）
+const TITLE_DELAY = 300;                 // 卡片開始淡入之後，過多久開始出字（毫秒）
 
 const CSS = `
 .ld{position:absolute;inset:0;overflow:hidden;background:#f8efce;transition:opacity ${FADE_OUT}ms ease}
@@ -30,6 +37,8 @@ const CSS = `
 .ld.in .ld-card{opacity:1}
 .ld-cover{position:absolute;left:0;top:0;width:235px;height:235px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);object-fit:cover;display:block;background:#d2d6d3}
 .ld-title{position:absolute;left:-1px;top:251px;font:32px/42px "BIZ UDPMincho","Hiragino Mincho ProN","Songti TC",serif;color:#748180;white-space:nowrap}
+.ld-ch{opacity:0;transition-property:opacity;transition-timing-function:ease-out}
+.ld.in .ld-ch{opacity:1}
 .ld-artist{position:absolute;right:0;top:259px;width:19px;font:19px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#748180;text-align:center}
 .ld-line{position:absolute;left:0;top:402px;width:235px;height:1px;background:#fff}
 .ld-line i{position:absolute;left:0;top:0;height:100%;width:0;background:#748180}
@@ -53,7 +62,7 @@ const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 
 export default {
   type: 'loading',
-  name: 'loading',
+  name: '載入畫面',
 
   // el：全螢幕的容器；ctx.asset(p)：把相對路徑換成網址
   mount(el, ctx) {
@@ -66,10 +75,10 @@ export default {
         '<canvas class="ld-bg"></canvas>' +
         '<div class="ld-card">' +
           '<img class="ld-cover" alt="">' +
-          '<div class="ld-title">每個人<br>都是<br>一種文體</div>' +
+          '<div class="ld-title">' + titleHTML() + '</div>' +
           '<div class="ld-artist">梅<br>林<br>玫<br>羚</div>' +
           '<div class="ld-line"><i></i></div>' +
-          '<div class="ld-cap">Interactive Music Video</div>' +
+          '<div class="ld-cap">' + CAPTION + '</div>' +
           '<div class="ld-warn">請同意相機權限</div>' +
           '<button class="ld-btn" type="button" disabled><span class="l">Loading</span><span class="p">PLAY</span></button>' +
         '</div>' +
@@ -156,6 +165,18 @@ export default {
   },
 };
 
+// 標題的每個字包成一個 span，淡入的先後順序每次隨機
+function titleHTML() {
+  const chars = TITLE_LINES.join('').split('');
+  const order = chars.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
+  let k = 0;
+  return TITLE_LINES.map(line => line.split('').map(ch => {
+    const delay = TITLE_DELAY + order.indexOf(k++) * TITLE_CHAR_GAP;
+    return `<span class="ld-ch" style="transition-duration:${TITLE_CHAR_FADE}ms;transition-delay:${delay}ms">${ch}</span>`;
+  }).join('')).join('<br>');
+}
+
 async function fontsReady() {
   if (!document.fonts || !document.fonts.load) return;
   // 先等 Google Fonts 的 CSS 載入，字型才有定義
@@ -164,7 +185,7 @@ async function fontsReady() {
   await Promise.all([
     document.fonts.load('26px "BIZ UDPMincho"', '每個人都是一種文體'),
     document.fonts.load('15px "Shippori Antique"', '梅林玫羚'),
-    document.fonts.load('22px "Roboto Slab"', 'Loading PLAY Interactive Music Video'),
+    document.fonts.load('22px "Roboto Slab"', 'Loading PLAY ' + CAPTION),
   ]).catch(() => {});
 }
 
