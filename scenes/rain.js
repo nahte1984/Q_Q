@@ -23,6 +23,7 @@ const PHRASE_FONT = '"Chiron Sung HK"';
 const CHAR_SIZE_MIN = 40, CHAR_SIZE_MAX = 50;   // 句子拆開後每個字的大小（px，比符號大）
 const CHAR_COLOR = '#fff';                       // 句子的字一律白色
 const CHAR_SPREAD = 260;                 // 每個字出發時上下錯開的距離（px），讓它們不會排成一排
+const CHAR_FALL = 1.25;                  // 句子的字比符號平均落得快多少（1.25 = 快 25%）
 const PHRASES = [
   { at: 16000, text: '每個人都是一種文體' },
   { at: 19000, text: '你覺得你是哪一種' },
@@ -175,8 +176,9 @@ export default {
       const p = drops[i];
       if (dt > 0) {
         if (!p.bouncing) {
-          p.vy += (Math.random() - 0.5) * 360 * SPEED * dt;
-          p.vy = Math.min(FALL_MAX * 1.15, Math.max(FALL_MIN * 0.8, p.vy));
+          const k = p.fall || 1;
+          p.vy += (Math.random() - 0.5) * 360 * SPEED * k * dt;
+          p.vy = Math.min(FALL_MAX * 1.15 * k, Math.max(FALL_MIN * 0.8 * k, p.vy));
           for (let k = 0; k < faces.length; k++) {
             const b = faces[k], dx = p.x - b.cx, dy = p.y - b.cy;
             if (dy < 0 && (dx * dx) / (b.rx * b.rx) + (dy * dy) / (b.ry * b.ry) <= 1) {
@@ -215,6 +217,8 @@ export default {
 };
 
 /* ---------- 產生符號、句子 ---------- */
+// 符號的速度會依大小乘上 0.85–1.15（大部分符號偏小），這是它們平均的係數；句子的字以它為基準再快 CHAR_FALL
+const SYMBOL_AVG = 0.85 + 0.3 / (SIZE_CURVE + 1);
 function newSymbol(W, ms) {
   const r = Math.random();
   const size = SIZE_MIN + (SIZE_MAX - SIZE_MIN) * Math.pow(r, SIZE_CURVE);
@@ -235,9 +239,9 @@ function newChar(W, sprite) {
   return {
     x: size / 2 + Math.random() * Math.max(0, W - size), y: -size - Math.random() * CHAR_SPREAD,
     vx: (Math.random() - 0.5) * 90 * SPEED,
-    vy: FALL_MIN + Math.random() * (FALL_MAX - FALL_MIN),
+    vy: (FALL_MIN + Math.random() * (FALL_MAX - FALL_MIN)) * SYMBOL_AVG * CHAR_FALL,
     rot: (Math.random() - 0.5) * 0.6, vr: (Math.random() - 0.5) * 0.8 * SPEED,
-    size, sprite, bouncing: false,
+    size, sprite, fall: SYMBOL_AVG * CHAR_FALL, bouncing: false,
   };
 }
 
