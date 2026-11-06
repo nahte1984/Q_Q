@@ -9,7 +9,7 @@
 
    效果的演算法照 grainrad.com 的 shader 寫（參數用截圖 01–09 的設定），
    由左到右、由上到下：
-     01 Halftone    02 ASCII（BINARY）  03 Contour
+     01 Halftone    02 ASCII（DETAILED）03 Contour
      04 Noise Field 05 Blockify         06 Dithering
      07 Dots        08 Voronoi          09 Threshold
    九格一次用 WebGL 畫完，手機上也很輕。
@@ -30,14 +30,14 @@ const EFFECT_SCALE = 1;
 /* ---------- 九種效果的參數（照截圖） ---------- */
 const FX = {
   halftone:  { brightness: 15, contrast: 0, spacing: 11, angle: 45 },               // 01 Circle、Original
-  ascii:     { brightness: 25, contrast: 0, scale: 3, spacing: 0.3 },                // 02 BINARY、Original、背景黑
+  ascii:     { brightness: 25, contrast: 0, scale: 3, spacing: 0.3 },                // 02 DETAILED、Original、背景黑
   contour:   { brightness: 30, contrast: -5, levels: 6, lineThickness: 0.5, lineColor: '#e0714f' },   // 03 Filled Bands、Original
   noise:     { brightness: 13, contrast: -5, scale: 100, intensity: 3, speed: 0.1 },  // 04 Perlin、1 octave、Animate
   blockify:  { brightness: 10, contrast: 0, blockSize: 15 },                         // 05 Full Blocks、Preserve Colors
   dithering: { brightness: -30, contrast: -30, gamma: 2, matrix: 8 },                 // 06 Bayer 8x8、Original、背景黑
   dots:      { brightness: 10, contrast: 0, size: 1, spacing: 2 },                    // 07 Diamond、Square Grid、Original
   voronoi:   { brightness: 5, contrast: 0, cellSize: 20, randomize: 1 },              // 08 Cell Average、Edge Width 0
-  threshold: { brightness: 15, contrast: 30, levels: 6 },                             // 09 Original
+  threshold: { brightness: -15, contrast: -25, levels: 6 },                           // 09 Threshold Point 0.1（6 階時用不到）、Original
 };
 // 03 的線條顏色：grainrad 在 Original 模式下不會顯示這個設定，這是從截圖取的顏色
 
@@ -46,7 +46,8 @@ const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;
 
 /* ---------- ASCII 用的字 ---------- */
 const ASCII_FONT = '"JetBrains Mono"';   // grainrad 的 ASCII 用粗體 JetBrains Mono
-const ASCII_CHARS = ' 01';               // BINARY
+// DETAILED（grainrad 的字符組，越後面越亮）
+const ASCII_CHARS = " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$";
 const GLYPH_H = 64, GLYPH_W = Math.ceil(GLYPH_H * 0.6);
 
 const hex = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
@@ -146,7 +147,7 @@ vec3 fxHalftone(vec2 q){
   return mix(c, vec3(0.0), pattern);
 }
 
-/* 02 ASCII（BINARY） */
+/* 02 ASCII（DETAILED） */
 vec3 fxAscii(vec2 q){
   vec2 cell = vec2(${N(P.ascii.scale * 8 * 0.6)}, ${N(P.ascii.scale * 8)});
   vec2 cp = floor(q / cell), cuv = fract(q / cell);
