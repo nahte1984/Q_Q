@@ -59,8 +59,8 @@ const FONTS = [
   'https://fonts.googleapis.com/css2?family=BIZ+UDPMincho&display=swap&text=' + encodeURIComponent(FONT_TEXT.biz),
   'https://fonts.googleapis.com/css2?family=Shippori+Antique&display=swap&text=' + encodeURIComponent(FONT_TEXT.shippori),
   'https://fonts.googleapis.com/css2?family=Chiron+Sung+HK:wght@400&display=swap&text=' + encodeURIComponent(FONT_TEXT.chiron),
-  // JetBrains Mono 粗體：divide 的 ASCII（grainrad 用的字型，只載 0 和 1）
-  'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&display=swap&text=01',
+  // JetBrains Mono 粗體：divide 的 ASCII（grainrad 用的字型；英文字型，檔案很小，整套載入）
+  'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700&display=swap',
 ];
 // 等 Google Fonts 的 CSS 載好，再等指定的字型和字下載完成（canvas 寫字前要先等，不然會用到預設字型）
 async function fontReady(css, text) {
