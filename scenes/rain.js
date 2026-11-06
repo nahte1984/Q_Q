@@ -19,7 +19,7 @@ const SYMBOL_FONT = '"BIZ UDPMincho"';
 const SIZE_MIN = 12, SIZE_MAX = 38;      // 符號大小（px）；大部分偏小，少數很大
 const SIZE_CURVE = 1.8;                  // 越大，小符號越多
 
-const PHRASE_FONT = '"Shippori Antique"';
+const PHRASE_FONT = '"Chiron Sung HK"';
 const CHAR_SIZE_MIN = 40, CHAR_SIZE_MAX = 50;   // 句子拆開後每個字的大小（px，比符號大）
 const CHAR_COLOR = '#fff';                       // 句子的字一律白色
 const CHAR_SPREAD = 260;                 // 每個字出發時上下錯開的距離（px），讓它們不會排成一排
