@@ -46,11 +46,24 @@ function isPhone() {
 }
 
 // 共用字型（Google Fonts）。中文字型只下載用到的字，所以文字有改的話，這裡也要補上新的字
+const FONT_TEXT = {
+  // BIZ UDPMincho：載入畫面的標題、rain 的符號雨
+  biz: '每個人都是一種文體' + '!@#$%^&*,;:\'"?】◎§—/…《、·(>{∞〃※',
+  // Shippori Antique：歌手名、橫式提示、rain 落下的句子
+  shippori: '梅林玫羚請把手機轉成直式' + '每個人都是一種文體你覺得你是哪一種',
+};
 const FONTS = [
   'https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400&display=swap',
-  'https://fonts.googleapis.com/css2?family=BIZ+UDPMincho&display=swap&text=' + encodeURIComponent('每個人都是一種文體'),
-  'https://fonts.googleapis.com/css2?family=Shippori+Antique&display=swap&text=' + encodeURIComponent('梅林玫羚請把手機轉成直式'),
+  'https://fonts.googleapis.com/css2?family=BIZ+UDPMincho&display=swap&text=' + encodeURIComponent(FONT_TEXT.biz),
+  'https://fonts.googleapis.com/css2?family=Shippori+Antique&display=swap&text=' + encodeURIComponent(FONT_TEXT.shippori),
 ];
+// 等 Google Fonts 的 CSS 載好，再等指定的字型和字下載完成（canvas 寫字前要先等，不然會用到預設字型）
+async function fontReady(css, text) {
+  if (!document.fonts || !document.fonts.load) return;
+  const links = [...document.querySelectorAll('link[href*="fonts.googleapis.com/css2"]')];
+  await Promise.all(links.map(l => l.sheet ? 0 : new Promise(r => { l.addEventListener('load', r, { once: true }); l.addEventListener('error', r, { once: true }); })));
+  await Promise.race([document.fonts.load(css, text), wait(8000)]).catch(() => {});
+}
 
 const params = new URLSearchParams(location.search);
 const num = k => { const v = params.get(k); if (v == null || v === '') return null; const n = parseFloat(v); return Number.isFinite(n) ? n : null; };
@@ -498,6 +511,10 @@ function makeRec(scene, url) {
     return v;
   })(), 3);
   st.json = p => progress.track(fetch(st.asset(p)).then(r => { if (!r.ok) throw new Error(`載不到 ${p}`); return r.json(); }));
+  // 等字型載好：await stage.font('40px "BIZ UDPMincho"', '要用到的字')（字也要加進 stage.js 的 FONT_TEXT）
+  st.font = (css, text) => progress.track(fontReady(css, text));
+  // 把任何要等的事情算進載入進度：await stage.track(promise)
+  st.track = (p, w = 1) => progress.track(p, w);
   st.file = p => progress.track(fetch(st.asset(p)).then(r => { if (!r.ok) throw new Error(`載不到 ${p}`); return r.arrayBuffer(); }));
   allRecs.push(rec);
   return rec;
