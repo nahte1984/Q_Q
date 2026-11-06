@@ -49,13 +49,16 @@ function isPhone() {
 const FONT_TEXT = {
   // BIZ UDPMincho：載入畫面的標題、rain 的符號雨
   biz: '每個人都是一種文體' + '!@#$%^&*,;:\'"?】◎§—/…《、·(>{∞〃※',
-  // Shippori Antique：歌手名、橫式提示、rain 落下的句子
-  shippori: '梅林玫羚請把手機轉成直式' + '每個人都是一種文體你覺得你是哪一種',
+  // Shippori Antique：歌手名、橫式提示
+  shippori: '梅林玫羚請把手機轉成直式',
+  // Chiron Sung HK：rain 落下的句子
+  chiron: '每個人都是一種文體你覺得你是哪一種',
 };
 const FONTS = [
   'https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400&display=swap',
   'https://fonts.googleapis.com/css2?family=BIZ+UDPMincho&display=swap&text=' + encodeURIComponent(FONT_TEXT.biz),
   'https://fonts.googleapis.com/css2?family=Shippori+Antique&display=swap&text=' + encodeURIComponent(FONT_TEXT.shippori),
+  'https://fonts.googleapis.com/css2?family=Chiron+Sung+HK:wght@400&display=swap&text=' + encodeURIComponent(FONT_TEXT.chiron),
 ];
 // 等 Google Fonts 的 CSS 載好，再等指定的字型和字下載完成（canvas 寫字前要先等，不然會用到預設字型）
 async function fontReady(css, text) {
