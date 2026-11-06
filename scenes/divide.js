@@ -1,7 +1,8 @@
 /* ==========================================================================
    divide — 九宮格鏡頭，九種 grainrad 效果拼成一個完整的畫面
    --------------------------------------------------------------------------
-   29800 ms   rain 整個畫面縮小進中間那一格，九宮格出現。
+   29800 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
+              點畫面：九個格子隨機換位子。
               前鏡頭畫面鋪滿整個九宮格（像 object-fit: cover），每一格只露出自己那一塊，
               再各自套一種 grainrad 的效果；九格拼起來就是原本完整的鏡頭畫面（格子之間的縫會蓋掉一點）。
    版面：      格子和格子、格子和瀏覽器邊界都距離 5px，九宮格放到最大，直到碰到畫面的寬或高；
@@ -12,7 +13,7 @@
      01 Halftone    02 ASCII（DETAILED）03 Contour
      04 Noise Field 05 Blockify         06 Dithering
      07 Dots        08 Voronoi          09 Threshold
-   九格一次用 WebGL 畫完，手機上也很輕。
+   九格都用同一個 WebGL 畫布畫，手機上也很輕。
    ========================================================================== */
 
 /* ---------- 版面 ---------- */
@@ -20,6 +21,16 @@ const CARD_W = 122, CARD_H = 197;        // 格子比例（Figma）
 const GAP = 5;                           // 格子之間、格子和瀏覽器邊界的距離（px）
 const RADIUS = 5;                        // 圓角（px）
 const BG_COLOR = '#313131';              // 格子外面
+
+/* ---------- 進場：九格用隨機的順序一格一格淡入，背景色同時蓋過上一段 ----------
+   index.html 裡 divide 那一行的 dur 要和 INTRO 一樣 */
+const INTRO = 1300;                      // 整個進場（毫秒）
+const CARD_FADE = 500;                   // 每一格淡入花多久（毫秒）；九格的開始時間平均分散在剩下的時間裡
+
+/* ---------- 點畫面：九個格子隨機換位子 ---------- */
+const SHUFFLE_MS = 700;                  // 換位子的動畫（毫秒）
+const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
+                                         // false：只有效果換位子，畫面還是完整的
 
 /* ---------- 效果的尺寸 ----------
    grainrad 的參數（間距 11、方塊 15…）是以 1280 × 720 的鏡頭畫面為單位。
@@ -55,6 +66,12 @@ const hex = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16 & 255) /
 const bri = v => v / 100;
 const con = v => { const c = v / 100; return (1 + c) / (1 - c * 0.99); };
 
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const smooth = x => x * x * (3 - 2 * x);
+const easeInOut = x => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const shuffled = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const HOME = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+
 export default {
   name: 'divide',
   needs: { camera: true },
@@ -65,7 +82,41 @@ export default {
     await stage.font(`bold ${GLYPH_H}px ${ASCII_FONT}`, ASCII_CHARS);
     this.gl = effectLayer(this.canvas, bakeAtlas());
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，divide 不會出現');
-    else this.gl.draw(null, this.layout(stage), 0);   // 暖機
+    this.reset();
+    // 暖機：九種效果都先畫一次（透明的），讓手機先把 shader 準備好，進場時才不會卡一下
+    if (this.gl) this.gl.draw(null, this.layout(stage), 0, HOME.map(c => ({ fx: c, a: 0, x: 0, y: 0, sx: 0, sy: 0 })), 0);
+    // 點畫面：換位子
+    stage.root.style.touchAction = 'manipulation';
+    stage.root.addEventListener('pointerdown', () => { if (this.active) this.shuffle(); });
+  },
+
+  reset() {
+    this.order = shuffled(HOME);          // 淡入的順序
+    this.slot = HOME.slice();             // 第 c 格（第 c 種效果）現在在哪個位置
+    this.from = HOME.map(slotXY);         // 換位子動畫的起點
+    this.moveAt = -Infinity;
+  },
+
+  enter() { this.active = true; this.reset(); },
+  exit() { this.active = false; },
+
+  // 每一格現在的位置（以格子為單位：x = 第幾欄、y = 第幾列，移動中會有小數）
+  positions(now) {
+    const k = easeInOut(clamp01((now - this.moveAt) / SHUFFLE_MS));
+    return this.slot.map((s, c) => {
+      const a = this.from[c], b = slotXY(s);
+      return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+    });
+  },
+
+  // 換位子：每一格都換到別的位置（從現在的位置出發，動畫中再點也可以）
+  shuffle() {
+    const now = performance.now();
+    this.from = this.positions(now);
+    let next;
+    do next = shuffled(HOME); while (next.some((s, c) => s === this.slot[c]));
+    this.slot = next;
+    this.moveAt = now;
   },
 
   // 九宮格在畫面上的位置：四周和格子之間都留 GAP，格子放到最大（寬或高先碰到邊界為止），置中
@@ -77,18 +128,30 @@ export default {
     return { W, cw, ch, gw, gh, x: (W - gw) / 2, y: (H - gh) / 2 };
   },
 
-  // 縮小轉場：上一段縮進中間那一格
-  transitionTarget(stage) {
-    const L = this.layout(stage);
-    return { x: L.x + L.cw + GAP, y: L.y + L.ch + GAP, w: L.cw, h: L.ch, r: RADIUS };
-  },
-
   update(stage, f) {
     if (!this.gl) return;
+    const L = this.layout(stage), sx = L.cw + GAP, sy = L.ch + GAP;
+    const t = f ? f.local * 1000 : INTRO;          // 進場進度（毫秒，照音樂時間）
+    const pos = this.positions(performance.now());
+    const cards = [];
+    for (let c = 0; c < 9; c++) {
+      const start = this.order.indexOf(c) * (INTRO - CARD_FADE) / 8;
+      const a = smooth(clamp01((t - start) / CARD_FADE));
+      if (a <= 0) continue;
+      const x = pos[c].x * sx, y = pos[c].y * sy;   // 相對九宮格左上角
+      const home = slotXY(c);
+      cards.push({
+        fx: c, a, x: L.x + x, y: L.y + y,
+        sx: SHUFFLE_CARRIES_IMAGE ? home.x * sx : x,   // 這一格的畫面從九宮格的哪裡取
+        sy: SHUFFLE_CARRIES_IMAGE ? home.y * sy : y,
+      });
+    }
     const v = stage.camera;
-    this.gl.draw(v && v.videoWidth > 0 ? v : null, this.layout(stage), f ? f.t : 0);
+    this.gl.draw(v && v.videoWidth > 0 ? v : null, L, f ? f.t : 0, cards, clamp01(t / INTRO));
   },
 };
+
+function slotXY(s) { return { x: s % 3, y: Math.floor(s / 3) }; }
 
 function bakeAtlas() {
   const c = document.createElement('canvas');
@@ -102,13 +165,22 @@ function bakeAtlas() {
   return c;
 }
 
-/* ---------- WebGL：一次畫完九格 ---------- */
+/* ---------- WebGL：每一格畫一個方塊，各自套自己的效果 ---------- */
 const N = x => (Number.isInteger(x) ? x.toFixed(1) : String(x));   // 數字放進 shader
 function effectLayer(canvas, atlas) {
-  const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: false, stencil: false });
+  const gl = canvas.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: true, depth: false, stencil: false });
   if (!gl) return null;
   const P = FX;
-  const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
+  const vs = `
+attribute vec2 p;
+uniform vec2 uRes;
+uniform vec4 uRect;          // 這一格在畫面上的位置（裝置像素，四邊各多 1px 讓邊緣柔化）
+varying vec2 vLocal;         // 格子裡的位置（裝置像素）
+void main(){
+  vec2 px = uRect.xy + p * uRect.zw;
+  vLocal = p * uRect.zw - 1.0;
+  gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
+}`;
   const fs = `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
 precision highp float;
@@ -116,9 +188,10 @@ precision highp float;
 precision mediump float;
 #endif
 uniform sampler2D uCam, uAtlas;
-uniform float uHasCam, uUnit, uTime, uGap, uRadius, uGrain, uGrainPx;
-uniform vec2 uRes, uOrigin, uCard, uGridG, uCamScale, uSeed;
-uniform vec3 uBg, uLine;
+uniform float uHasCam, uUnit, uTime, uRadius, uGrain, uGrainPx, uFx, uAlpha;
+uniform vec2 uCard, uGridG, uCamScale, uSeed, uSrc;
+uniform vec3 uLine;
+varying vec2 vLocal;
 
 const vec3 LUMA = vec3(0.299, 0.587, 0.114);
 float luma(vec3 c){ return dot(c, LUMA); }
@@ -255,33 +328,25 @@ vec3 fxThreshold(vec2 q){
   return clamp(floor(c * L + 0.5) / L, 0.0, 1.0);
 }
 
+
 void main(){
-  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) - uOrigin;   // 以九宮格左上角為原點，往下為正（裝置像素）
-  vec2 stp = uCard + uGap;
-  vec2 ij = floor(p / stp);
-  vec3 col = uBg;
-  if (ij.x >= 0.0 && ij.x < 3.0 && ij.y >= 0.0 && ij.y < 3.0) {
-    vec2 l = p - ij * stp;
-    vec2 r = abs(l - uCard * 0.5) - (uCard * 0.5 - uRadius);
-    float inside = clamp(0.5 - (length(max(r, 0.0)) + min(max(r.x, r.y), 0.0) - uRadius), 0.0, 1.0);   // 圓角
-    if (inside > 0.0) {
-      vec2 q = p / uUnit;                                   // grainrad 的像素座標
-      float k = ij.y * 3.0 + ij.x;
-      vec3 c;
-      if (k < 0.5) c = fxHalftone(q);
-      else if (k < 1.5) c = fxAscii(q);
-      else if (k < 2.5) c = fxContour(q);
-      else if (k < 3.5) c = fxNoise(q);
-      else if (k < 4.5) c = fxBlockify(q);
-      else if (k < 5.5) c = fxDither(q);
-      else if (k < 6.5) c = fxDots(q);
-      else if (k < 7.5) c = fxVoronoi(q);
-      else c = fxThreshold(q);
-      c += (grainHash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain;
-      col = mix(uBg, c, inside);
-    }
-  }
-  gl_FragColor = vec4(col, 1.0);
+  vec2 r = abs(vLocal - uCard * 0.5) - (uCard * 0.5 - uRadius);
+  float inside = clamp(0.5 - (length(max(r, 0.0)) + min(max(r.x, r.y), 0.0) - uRadius), 0.0, 1.0);   // 圓角
+  if (inside <= 0.0) discard;
+  vec2 q = (uSrc + clamp(vLocal, vec2(0.0), uCard)) / uUnit;   // grainrad 的像素座標
+  vec3 c;
+  if (uFx < 0.5) c = fxHalftone(q);
+  else if (uFx < 1.5) c = fxAscii(q);
+  else if (uFx < 2.5) c = fxContour(q);
+  else if (uFx < 3.5) c = fxNoise(q);
+  else if (uFx < 4.5) c = fxBlockify(q);
+  else if (uFx < 5.5) c = fxDither(q);
+  else if (uFx < 6.5) c = fxDots(q);
+  else if (uFx < 7.5) c = fxVoronoi(q);
+  else c = fxThreshold(q);
+  c = clamp(c + (grainHash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain, 0.0, 1.0);
+  float a = inside * uAlpha;
+  gl_FragColor = vec4(c * a, a);
 }`;
   const sh = (type, src) => {
     const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
@@ -298,10 +363,12 @@ void main(){
   } catch (err) { console.warn('divide shader 失敗', err); return null; }
   gl.useProgram(prog);
   gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1]), gl.STATIC_DRAW);
   const loc = gl.getAttribLocation(prog, 'p');
   gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // 顏色已經乘過透明度
 
   const mkTex = unit => {
     const t = gl.createTexture();
@@ -320,12 +387,12 @@ void main(){
 
   const u = n => gl.getUniformLocation(prog, n);
   const U = {};
-  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uGap', 'uRadius', 'uGrainPx', 'uRes', 'uOrigin', 'uCard', 'uGridG', 'uCamScale', 'uSeed']) U[n] = u(n);
+  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uRadius', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
   gl.uniform1i(u('uCam'), 0);
   gl.uniform1i(u('uAtlas'), 1);
-  gl.uniform3fv(u('uBg'), hex(BG_COLOR));
   gl.uniform3fv(u('uLine'), hex(P.contour.lineColor));
   gl.uniform1f(u('uGrain'), GRAIN_AMOUNT);
+  const BG = hex(BG_COLOR);
 
   let texW = 0, texH = 0, fresh = true, watching = null;
   const watch = v => {
@@ -336,7 +403,9 @@ void main(){
   };
 
   return {
-    draw(video, L, time) {
+    // cards：[{ fx: 第幾種效果, x, y: 格子左上角（CSS px）, sx, sy: 畫面從九宮格的哪裡取（CSS px）, a: 透明度 }]
+    // bgA：背景色的透明度（進場時從 0 到 1，蓋過上一段）
+    draw(video, L, time, cards, bgA) {
       if (gl.isContextLost()) return;
       gl.activeTexture(gl.TEXTURE0);
       let V = 1;
@@ -354,19 +423,25 @@ void main(){
       const unit = L.gh / 720 * EFFECT_SCALE;                      // 每個 grainrad 像素是幾個 CSS px
       const A = L.gw / L.gh;
       gl.viewport(0, 0, Wd, Hd);
+      gl.clearColor(BG[0] * bgA, BG[1] * bgA, BG[2] * bgA, bgA);
+      gl.clear(gl.COLOR_BUFFER_BIT);
       gl.uniform1f(U.uHasCam, video ? 1 : 0);
       gl.uniform1f(U.uUnit, unit * d);
       gl.uniform1f(U.uTime, time || 0);
       gl.uniform2f(U.uRes, Wd, Hd);
-      gl.uniform2f(U.uOrigin, L.x * d, L.y * d);
       gl.uniform2f(U.uCard, L.cw * d, L.ch * d);
-      gl.uniform1f(U.uGap, GAP * d);
       gl.uniform1f(U.uRadius, RADIUS * d);
       gl.uniform2f(U.uGridG, L.gw / unit, L.gh / unit);
       gl.uniform2f(U.uCamScale, A > V ? 1 : A / V, A > V ? V / A : 1);
       gl.uniform2f(U.uSeed, Math.random() * 1000, Math.random() * 1000);
       gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
-      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      for (const c of cards) {
+        gl.uniform4f(U.uRect, c.x * d - 1, c.y * d - 1, L.cw * d + 2, L.ch * d + 2);
+        gl.uniform2f(U.uSrc, c.sx * d, c.sy * d);
+        gl.uniform1f(U.uFx, c.fx);
+        gl.uniform1f(U.uAlpha, c.a);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
     },
   };
 }
