@@ -50,7 +50,7 @@ const FONT_TEXT = {
   // BIZ UDPMincho：載入畫面的標題、rain 的符號雨
   biz: '每個人都是一種文體' + '!@#$%^&*,;:\'"?】◎§—/…《、·(>{∞〃※',
   // Shippori Antique：歌手名、橫式提示
-  shippori: '梅林玫羚請把手機轉成直式',
+  shippori: '梅林玫羚請把手機轉成直式' + '請同意相機權限',
   // Chiron Sung HK：rain 落下的句子
   chiron: '每個人都是一種文體你覺得你是哪一種',
 };
@@ -406,6 +406,7 @@ const devScreen = {
   },
   message(s) { this.msg.textContent = s; },
   starting() { this.btn.hidden = true; },
+  cameraDenied() { this.msg.textContent = '請同意相機權限'; this.btn.hidden = false; },
   hide() { this.el.classList.add('gone'); return wait(400); },
 };
 
@@ -437,14 +438,18 @@ const ui = {
   ready(go) {
     this.isReady = true;
     call0(startScreen, 'progress', 1);
-    let fired = false;
-    const once = () => { if (fired) return; fired = true; removeEventListener('keydown', k); go(); };
-    const k = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); once(); } };
-    addEventListener('keydown', k);
-    call0(startScreen, 'ready', once);
+    // 可以按很多次（例如相機權限被拒之後再按一次）；開始之後才拿掉鍵盤的監聽
+    this.key = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+    addEventListener('keydown', this.key);
+    call0(startScreen, 'ready', go);
   },
   message(s) { call0(startScreen, 'message', s); },
   starting() { call0(startScreen, 'starting'); },
+  cameraDenied() {
+    if (startScreen.cameraDenied) call0(startScreen, 'cameraDenied');
+    else call0(startScreen, 'message', '請同意相機權限');
+  },
+  started() { if (this.key) removeEventListener('keydown', this.key); },
   async hide() {
     try { await startScreen.hide(); } catch (e) {}
     if (overlayEl) { overlayEl.remove(); overlayEl = null; }
@@ -530,9 +535,11 @@ function call(rec, hook, ...args) {
 }
 
 /* ---------- 相機、陀螺儀 ---------- */
+// 成功回傳 true；被拒絕或沒有相機回傳 false
 async function openCamera() {
+  let v = null;
   try {
-    const v = document.createElement('video');
+    v = document.createElement('video');
     v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.autoplay = true;
     v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
     document.body.appendChild(v);
@@ -543,9 +550,11 @@ async function openCamera() {
     await v.play().catch(() => {});
     if (!v.videoWidth) await new Promise(r => { v.onloadeddata = r; setTimeout(r, 3000); });
     shared.camera = v; shared.cameraStream = stream;
+    return true;
   } catch (err) {
     console.warn('相機沒有開啟：', err);
-    ui.error(`相機沒有開啟：${err.message || err}`);
+    if (v) v.remove();
+    return false;
   }
 }
 function listenMotion() {
@@ -559,8 +568,11 @@ function listenMotion() {
     if (a) { m.ax = a.x || 0; m.ay = a.y || 0; m.az = a.z || 0; }
   });
 }
+let motionAsked = false;
 function requestMotion() {
-  // iOS 需要在點擊當下要權限；兩個請求同時發出
+  // iOS 需要在點擊當下要權限；兩個請求同時發出。只要一次
+  if (motionAsked) return Promise.resolve();
+  motionAsked = true;
   const jobs = [];
   try { if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) jobs.push(DeviceOrientationEvent.requestPermission()); } catch (e) {}
   try { if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) jobs.push(DeviceMotionEvent.requestPermission()); } catch (e) {}
@@ -757,9 +769,16 @@ async function start() {
   audio.unlock();
   const jobs = [];
   if (needMotion) jobs.push(requestMotion());
-  if (needCamera) { ui.message('開啟相機…'); jobs.push(openCamera()); }
+  if (needCamera && !shared.camera) { ui.message('開啟相機…'); jobs.push(openCamera()); }
   ui.starting();
   await Promise.all(jobs);
+  // 需要相機卻沒拿到權限：不播放，提示觀眾，按 PLAY 時再要一次
+  if (needCamera && !shared.camera) {
+    launching = false;
+    ui.cameraDenied();
+    return;
+  }
+  ui.started();
   for (const r of allRecs) { try { await call(r, 'ready'); } catch (err) { report(r, 'ready', err); } }
   director.exitAll();
   audio.seek(director.home);
