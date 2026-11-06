@@ -66,7 +66,7 @@ const hueColor = i => `hsl(${i * 360 / HUE_STEPS}, 100%, 55%)`;
 export default {
   name: 'rain',
   needs: { camera: true },
-  dev: { from: 0, to: 29882 },
+  dev: { from: 0, to: 29800 },
 
   async preload(stage) {
     const root = stage.root;
