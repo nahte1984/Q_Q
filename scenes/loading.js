@@ -26,15 +26,18 @@ const CSS = `
 .ld-bg{position:absolute;inset:0;width:100%;height:100%;display:block}
 .ld.nogl{background:linear-gradient(160deg,#f8efce 0%,#ffc2b4 30%,#d2d6d3 55%,#ccebc8 78%,#ff8f8f 100%)}
 .ld.nogl .ld-bg{display:none}
-.ld-card{position:absolute;left:50%;top:50%;width:235px;height:517px;transform:translate(-50%,-50%) scale(var(--s,1));opacity:0;transition:opacity .9s ease}
+.ld-card{position:absolute;left:50%;top:50%;width:235px;height:518px;transform:translate(-50%,-50%) scale(var(--s,1));opacity:0;transition:opacity .9s ease}
 .ld.in .ld-card{opacity:1}
 .ld-cover{position:absolute;left:0;top:0;width:235px;height:235px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);object-fit:cover;display:block;background:#d2d6d3}
 .ld-title{position:absolute;left:-1px;top:251px;font:32px/42px "BIZ UDPMincho","Hiragino Mincho ProN","Songti TC",serif;color:#748180;white-space:nowrap}
 .ld-artist{position:absolute;right:0;top:259px;width:19px;font:19px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#748180;text-align:center}
 .ld-line{position:absolute;left:0;top:402px;width:235px;height:1px;background:#fff}
 .ld-line i{position:absolute;left:0;top:0;height:100%;width:0;background:#748180}
-.ld-cap{position:absolute;left:0;top:426px;width:235px;text-align:center;font:15px/21.048px "Roboto Slab",Georgia,serif;color:#748180;white-space:nowrap}
-.ld-btn{position:absolute;left:35px;top:470px;width:165px;height:47px;padding:0;border:0;border-radius:50px;background:#bfbfbf;color:#e5e5e5;font:28px/1 "Roboto Slab",Georgia,serif;cursor:default;transition:background-color .5s ease,opacity .3s ease;-webkit-tap-highlight-color:transparent;outline:none}
+.ld-cap{position:absolute;left:0;top:426px;width:235px;text-align:center;font:15px/21.048px "Roboto Slab",Georgia,serif;color:#748180;white-space:nowrap;transition:opacity .3s ease}
+.ld-warn{position:absolute;left:0;top:426px;width:235px;text-align:center;font:17px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#bd4444;white-space:nowrap;opacity:0;transition:opacity .3s ease}
+.ld.denied .ld-cap{opacity:0}
+.ld.denied .ld-warn{opacity:1}
+.ld-btn{position:absolute;left:35px;top:471px;width:165px;height:47px;padding:0;border:0;border-radius:50px;background:#bfbfbf;color:#e5e5e5;font:28px/1 "Roboto Slab",Georgia,serif;cursor:default;transition:background-color .5s ease,opacity .3s ease;-webkit-tap-highlight-color:transparent;outline:none}
 .ld-btn span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transition:opacity .45s ease}
 .ld-btn .p{opacity:0}
 .ld.ready .ld-btn{background:#748180;cursor:pointer}
@@ -67,6 +70,7 @@ export default {
           '<div class="ld-artist">梅<br>林<br>玫<br>羚</div>' +
           '<div class="ld-line"><i></i></div>' +
           '<div class="ld-cap">Interactive Music Video</div>' +
+          '<div class="ld-warn">請同意相機權限</div>' +
           '<button class="ld-btn" type="button" disabled><span class="l">Loading</span><span class="p">PLAY</span></button>' +
         '</div>' +
       '</div>';
@@ -124,6 +128,14 @@ export default {
 
   // 按下 PLAY 之後（等相機權限時）
   starting() { if (this.root) { this.root.classList.add('starting'); this.btn.disabled = true; } },
+
+  // 沒拿到相機權限：不播放，說明文字換成「請同意相機權限」，PLAY 可以再按一次
+  cameraDenied() {
+    if (!this.root) return;
+    this.root.classList.remove('starting');
+    this.root.classList.add('denied');
+    this.btn.disabled = false;
+  },
 
   message() {},
 
