@@ -9,14 +9,19 @@
    ========================================================================== */
 
 // 背景的五個顏色（Figma 右邊那五個）
-const COLORS = ['#f8efce', '#ffc2b4', '#d2d6d3', '#ccebc8', '#ff8f8f'];
+export const COLORS = ['#f8efce', '#ffc2b4', '#d2d6d3', '#ccebc8', '#ff8f8f'];
+// 按下 PLAY 後，介面淡出要花多久（毫秒）
+const FADE_OUT = 1800;
+// 每次打開網頁背景的樣子都不同；但同一次裡所有用 colorBlend 的畫面共用這個值，
+// 所以 rain 接手時畫出來的背景和載入畫面一模一樣，看起來就像背景一直留著
+const BLEND_OFFSET = Math.random() * 200;
 // 背景流動速度：1 = 預設，2 = 兩倍快
 const SPEED = 1;
 // 封面（相對於這個檔）
 const COVER = '../images/cover.webp';
 
 const CSS = `
-.ld{position:absolute;inset:0;overflow:hidden;background:#f8efce;transition:opacity .7s ease}
+.ld{position:absolute;inset:0;overflow:hidden;background:#f8efce;transition:opacity ${FADE_OUT}ms ease}
 .ld.gone{opacity:0;pointer-events:none}
 .ld-bg{position:absolute;inset:0;width:100%;height:100%;display:block}
 .ld.nogl{background:linear-gradient(160deg,#f8efce 0%,#ffc2b4 30%,#d2d6d3 55%,#ccebc8 78%,#ff8f8f 100%)}
@@ -127,7 +132,7 @@ export default {
     const root = this.root;
     if (!root) return Promise.resolve();
     root.classList.add('gone');
-    return wait(750).then(() => { if (this.root === root) this.stop(); });
+    return wait(FADE_OUT + 50).then(() => { if (this.root === root) this.stop(); });
   },
 
   stop() {
@@ -241,7 +246,7 @@ void main(){
   gl.uniform3fv(gl.getUniformLocation(prog, 'uC'), new Float32Array(rgb));
   gl.uniform1f(gl.getUniformLocation(prog, 'uSharp'), sharp);
   gl.uniform1f(gl.getUniformLocation(prog, 'uWarp'), warp);
-  const offset = Math.random() * 200;   // 每次打開的樣子都不太一樣
+  const offset = BLEND_OFFSET;
 
   gl.clearColor(0xf8 / 255, 0xef / 255, 0xce / 255, 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
