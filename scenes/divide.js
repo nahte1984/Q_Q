@@ -1,47 +1,58 @@
 /* ==========================================================================
-   divide — 九宮格 ASCII 鏡頭
+   divide — 九宮格鏡頭，九種 grainrad 效果拼成一個完整的畫面
    --------------------------------------------------------------------------
    29800 ms   rain 整個畫面縮小進中間那一格，九宮格出現。
-              每一格用 grainrad 的一種字符組（Character Set）把前鏡頭畫面轉成 ASCII。
-              格子和格子、格子和瀏覽器邊界都距離 15px，九宮格放到最大，直到碰到畫面的寬或高；
-              格子比例照 Figma「Frame 4」（108 × 170），字跟著格子一起放大。
+              前鏡頭畫面鋪滿整個九宮格（像 object-fit: cover），每一格只露出自己那一塊，
+              再各自套一種 grainrad 的效果；九格拼起來就是原本完整的鏡頭畫面（格子之間的縫會蓋掉一點）。
+   版面：      格子和格子、格子和瀏覽器邊界都距離 5px，九宮格放到最大，直到碰到畫面的寬或高；
+              格子比例照 Figma「Frame 4」（122 × 197），圓角 5。
 
-   演算法和 grainrad 的 ASCII 一樣：把畫面切成字元大小的格子，取每格的平均亮度，
-   亮度 0–1 平均分配到字符組裡的字（越亮用越後面的字），字用米色、底用粉紅色。
+   效果的演算法照 grainrad.com 的 shader 寫（參數用截圖 01–09 的設定），
+   由左到右、由上到下：
+     01 Halftone    02 ASCII（BINARY）  03 Contour
+     04 Noise Field 05 Blockify         06 Dithering
+     07 Dots        08 Voronoi          09 Threshold
    九格一次用 WebGL 畫完，手機上也很輕。
    ========================================================================== */
 
-/* ---------- 可以調整的數字 ---------- */
-// 九種字符組（grainrad 的 Character Set），由左到右、由上到下排；中間那格是 MINIMAL
-const CHARSETS = [
-  { name: 'STANDARD',   chars: ' .:-=+*#%@' },
-  { name: 'BLOCKS',     chars: ' ░▒▓█' },
-  { name: 'BINARY',     chars: ' 01' },
-  { name: 'DETAILED',   chars: " .'`^\",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$" },
-  { name: 'MINIMAL',    chars: ' .:#' },
-  { name: 'ALPHABETIC', chars: ' .icotCOXWM' },
-  { name: 'NUMERIC',    chars: ' 1234567890' },
-  { name: 'MATH',       chars: ' .-+×÷=≠<>≤≥∞∑∏√∫' },
-  { name: 'SYMBOLS',    chars: ' ·•○◎●◐◑◒◓◔◕◖◗' },
-];
-const FONT = '"Share Tech Mono"';        // grainrad 用的等寬字（字型裡沒有的符號會用系統字型補）
-const CHAR_H = 9;                        // 字元格子的高度（以 Figma 108px 寬的格子計，格子放大時字跟著放大）；寬度是高度的 0.6 倍
-const CHAR_COLOR = '#f8efce';            // 字
-const CARD_COLOR = '#da8a8a';            // 格子的底
+/* ---------- 版面 ---------- */
+const CARD_W = 122, CARD_H = 197;        // 格子比例（Figma）
+const GAP = 5;                           // 格子之間、格子和瀏覽器邊界的距離（px）
+const RADIUS = 5;                        // 圓角（px）
 const BG_COLOR = '#313131';              // 格子外面
-const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;   // 格子上的顆粒（和 rain 的鏡頭一樣；不要顆粒就把 GRAIN_AMOUNT 改成 0）
 
-// 版面
-const CARD_W = 108, CARD_H = 170;        // 格子比例（Figma）
-const GAP = 15;                          // 格子之間、格子和瀏覽器邊界的距離（px）
-const RADIUS = 8;                        // 圓角（px）
+/* ---------- 效果的尺寸 ----------
+   grainrad 的參數（間距 11、方塊 15…）是以 1280 × 720 的鏡頭畫面為單位。
+   這裡把鏡頭畫面的高度（720）對齊九宮格的高度，所以效果和人臉的比例跟 grainrad 上看到的一樣。
+   覺得點點、方塊太大或太小，就調 EFFECT_SCALE（1 = 照 grainrad；0.8 = 小 20%） */
+const EFFECT_SCALE = 1;
 
-/* ---------- 字元圖集：每種字符組一列 ---------- */
-const GLYPH_W = 30, GLYPH_H = 50;        // 圖集裡每個字的格子（像素，寬:高 = 0.6）
-const MAX_LEN = Math.max(...CHARSETS.map(c => Array.from(c.chars).length));
-const ALL_CHARS = [...new Set(CHARSETS.flatMap(c => Array.from(c.chars)))].join('');
+/* ---------- 九種效果的參數（照截圖） ---------- */
+const FX = {
+  halftone:  { brightness: 15, contrast: 0, spacing: 11, angle: 45 },               // 01 Circle、Original
+  ascii:     { brightness: 25, contrast: 0, scale: 3, spacing: 0.3 },                // 02 BINARY、Original、背景黑
+  contour:   { brightness: 30, contrast: -5, levels: 6, lineThickness: 0.5, lineColor: '#e0714f' },   // 03 Filled Bands、Original
+  noise:     { brightness: 13, contrast: -5, scale: 100, intensity: 3, speed: 0.1 },  // 04 Perlin、1 octave、Animate
+  blockify:  { brightness: 10, contrast: 0, blockSize: 15 },                         // 05 Full Blocks、Preserve Colors
+  dithering: { brightness: -30, contrast: -30, gamma: 2, matrix: 8 },                 // 06 Bayer 8x8、Original、背景黑
+  dots:      { brightness: 10, contrast: 0, size: 1, spacing: 2 },                    // 07 Diamond、Square Grid、Original
+  voronoi:   { brightness: 5, contrast: 0, cellSize: 20, randomize: 1 },              // 08 Cell Average、Edge Width 0
+  threshold: { brightness: 15, contrast: 30, levels: 6 },                             // 09 Original
+};
+// 03 的線條顏色：grainrad 在 Original 模式下不會顯示這個設定，這是從截圖取的顏色
+
+// 顆粒（和 rain 的鏡頭一樣；不要顆粒就把 GRAIN_AMOUNT 改成 0）
+const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;
+
+/* ---------- ASCII 用的字 ---------- */
+const ASCII_FONT = '"JetBrains Mono"';   // grainrad 的 ASCII 用粗體 JetBrains Mono
+const ASCII_CHARS = ' 01';               // BINARY
+const GLYPH_H = 64, GLYPH_W = Math.ceil(GLYPH_H * 0.6);
 
 const hex = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
+// grainrad 的亮度／對比：亮度 -100～100 → -1～1；對比 -100～100 → 係數
+const bri = v => v / 100;
+const con = v => { const c = v / 100; return (1 + c) / (1 - c * 0.99); };
 
 export default {
   name: 'divide',
@@ -50,10 +61,10 @@ export default {
 
   async preload(stage) {
     this.canvas = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
-    await stage.font(`${GLYPH_H}px ${FONT}`, ALL_CHARS);
-    this.gl = asciiLayer(this.canvas, bakeAtlas());
+    await stage.font(`bold ${GLYPH_H}px ${ASCII_FONT}`, ASCII_CHARS);
+    this.gl = effectLayer(this.canvas, bakeAtlas());
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，divide 不會出現');
-    else this.gl.draw(null, this.layout(stage));   // 暖機
+    else this.gl.draw(null, this.layout(stage), 0);   // 暖機
   },
 
   // 九宮格在畫面上的位置：四周和格子之間都留 GAP，格子放到最大（寬或高先碰到邊界為止），置中
@@ -61,7 +72,8 @@ export default {
     const W = stage.width, H = stage.height;
     const cw = Math.max(1, Math.min((W - GAP * 4) / 3, (H - GAP * 4) / 3 * CARD_W / CARD_H));
     const ch = cw * CARD_H / CARD_W;
-    return { W, cw, ch, s: cw / CARD_W, x: (W - cw * 3 - GAP * 2) / 2, y: (H - ch * 3 - GAP * 2) / 2 };
+    const gw = cw * 3 + GAP * 2, gh = ch * 3 + GAP * 2;
+    return { W, cw, ch, gw, gh, x: (W - gw) / 2, y: (H - gh) / 2 };
   },
 
   // 縮小轉場：上一段縮進中間那一格
@@ -70,34 +82,31 @@ export default {
     return { x: L.x + L.cw + GAP, y: L.y + L.ch + GAP, w: L.cw, h: L.ch, r: RADIUS };
   },
 
-  update(stage) {
+  update(stage, f) {
     if (!this.gl) return;
     const v = stage.camera;
-    this.gl.draw(v && v.videoWidth > 0 ? v : null, this.layout(stage));
+    this.gl.draw(v && v.videoWidth > 0 ? v : null, this.layout(stage), f ? f.t : 0);
   },
 };
 
 function bakeAtlas() {
   const c = document.createElement('canvas');
-  c.width = MAX_LEN * GLYPH_W; c.height = CHARSETS.length * GLYPH_H;
+  c.width = ASCII_CHARS.length * GLYPH_W; c.height = GLYPH_H;
   const g = c.getContext('2d');
   g.fillStyle = '#000'; g.fillRect(0, 0, c.width, c.height);
   g.fillStyle = '#fff';
-  g.font = `${GLYPH_H}px ${FONT}, monospace`;
-  g.textAlign = 'center';
-  g.textBaseline = 'alphabetic';
-  CHARSETS.forEach((set, row) => {
-    Array.from(set.chars).forEach((ch, i) => {
-      g.fillText(ch, i * GLYPH_W + GLYPH_W / 2, row * GLYPH_H + GLYPH_H * 0.8, GLYPH_W);   // 和 grainrad 一樣，基線在 0.8 的位置
-    });
-  });
+  g.font = `bold ${GLYPH_H}px ${ASCII_FONT}, "SF Mono", "Courier New", monospace`;
+  g.textBaseline = 'top';
+  Array.from(ASCII_CHARS).forEach((ch, i) => g.fillText(ch, i * GLYPH_W, 0));
   return c;
 }
 
 /* ---------- WebGL：一次畫完九格 ---------- */
-function asciiLayer(canvas, atlas) {
+const N = x => (Number.isInteger(x) ? x.toFixed(1) : String(x));   // 數字放進 shader
+function effectLayer(canvas, atlas) {
   const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: false, stencil: false });
   if (!gl) return null;
+  const P = FX;
   const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
   const fs = `
 #ifdef GL_FRAGMENT_PRECISION_HIGH
@@ -106,46 +115,168 @@ precision highp float;
 precision mediump float;
 #endif
 uniform sampler2D uCam, uAtlas;
-uniform float uHasCam;
-uniform vec2 uRes, uOrigin, uCard, uChar, uAtlasGrid, uCamScale, uSeed;
-uniform float uGap, uRadius, uGrain, uGrainPx;
-uniform float uLen[9];
-uniform vec3 uCharCol, uCardCol, uBg;
-float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
-float luma(vec2 cardUV){
-  vec2 t = (cardUV - 0.5) * uCamScale + 0.5;     // 像 object-fit: cover
-  t.x = 1.0 - t.x;                               // 前鏡頭左右鏡像
-  return dot(texture2D(uCam, t).rgb, vec3(0.299, 0.587, 0.114));
+uniform float uHasCam, uUnit, uTime, uGap, uRadius, uGrain, uGrainPx;
+uniform vec2 uRes, uOrigin, uCard, uGridG, uCamScale, uSeed;
+uniform vec3 uBg, uLine;
+
+const vec3 LUMA = vec3(0.299, 0.587, 0.114);
+float luma(vec3 c){ return dot(c, LUMA); }
+// grainrad 的亮度／對比
+vec3 bc(vec3 c, float b, float k){ return clamp((c + b - 0.5) * k + 0.5, 0.0, 1.0); }
+float grainHash(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+
+// 鏡頭：q 是 grainrad 的像素座標（從九宮格左上角起算）；鏡頭畫面像 cover 一樣鋪滿整個九宮格，左右鏡像
+vec3 cam(vec2 q){
+  if (uHasCam < 0.5) return vec3(0.0);
+  vec2 t = (clamp(q / uGridG, 0.0, 1.0) - 0.5) * uCamScale + 0.5;
+  t.x = 1.0 - t.x;
+  return texture2D(uCam, t).rgb;
 }
+
+/* 01 Halftone */
+vec3 fxHalftone(vec2 q){
+  vec3 c = bc(cam(q), ${N(bri(P.halftone.brightness))}, ${N(con(P.halftone.contrast))});
+  float a = radians(${N(P.halftone.angle)}), s = sin(a), co = cos(a);
+  float freq = 1.0 / ${N(P.halftone.spacing)};
+  vec2 r = vec2(q.x * co - q.y * s, q.x * s + q.y * co) * freq;
+  float dist = length(fract(r) - 0.5);
+  float radius = sqrt(luma(c)) * 0.5;
+  float aa = 0.7 * freq / uUnit;                       // 邊緣柔化一個像素
+  float pattern = smoothstep(radius - aa, radius + aa, dist);
+  return mix(c, vec3(0.0), pattern);
+}
+
+/* 02 ASCII（BINARY） */
+vec3 fxAscii(vec2 q){
+  vec2 cell = vec2(${N(P.ascii.scale * 8 * 0.6)}, ${N(P.ascii.scale * 8)});
+  vec2 cp = floor(q / cell), cuv = fract(q / cell);
+  float ob = ${N(P.ascii.brightness / 200)}, ok = ${N((P.ascii.contrast + 100) / 100)};
+  float b = 0.0;
+  b += clamp((luma(cam((cp + vec2(0.25, 0.25)) * cell)) + ob - 0.5) * ok + 0.5, 0.0, 1.0);
+  b += clamp((luma(cam((cp + vec2(0.75, 0.25)) * cell)) + ob - 0.5) * ok + 0.5, 0.0, 1.0);
+  b += clamp((luma(cam((cp + vec2(0.25, 0.75)) * cell)) + ob - 0.5) * ok + 0.5, 0.0, 1.0);
+  b += clamp((luma(cam((cp + vec2(0.75, 0.75)) * cell)) + ob - 0.5) * ok + 0.5, 0.0, 1.0);
+  float idx = floor(clamp(b * 0.25, 0.0, 0.9999) * ${N(ASCII_CHARS.length)});
+  vec3 c = clamp((cam((cp + 0.5) * cell) + ob - 0.5) * ok + 0.5, 0.0, 1.0);
+  float hg = ${N(P.ascii.spacing * 0.25)};             // 字和字之間的空隙（grainrad 的 Spacing）
+  vec2 g = (cuv - hg) / (1.0 - 2.0 * hg);
+  float inGap = step(0.0001, hg) * (1.0 - step(0.0, g.x) * step(g.x, 1.0) * step(0.0, g.y) * step(g.y, 1.0));
+  g = clamp(g, vec2(0.5 / ${N(GLYPH_W)}, 0.5 / ${N(GLYPH_H)}), vec2(1.0 - 0.5 / ${N(GLYPH_W)}, 1.0 - 0.5 / ${N(GLYPH_H)}));
+  float glyph = texture2D(uAtlas, vec2((idx + g.x) / ${N(ASCII_CHARS.length)}, g.y)).r * (1.0 - inGap);
+  return c * glyph;                                     // 背景黑
+}
+
+/* 03 Contour */
+float contourLum(vec2 q){ return luma(bc(cam(q), ${N(bri(P.contour.brightness))}, ${N(con(P.contour.contrast))})); }
+vec3 fxContour(vec2 q){
+  float L = ${N(P.contour.levels)}, d = ${N(P.contour.lineThickness)};
+  vec3 c = bc(cam(q), ${N(bri(P.contour.brightness))}, ${N(con(P.contour.contrast))});
+  float cq = floor(luma(c) * L);
+  bool line = floor(contourLum(q + vec2(-d, 0.0)) * L) != cq || floor(contourLum(q + vec2(d, 0.0)) * L) != cq
+           || floor(contourLum(q + vec2(0.0, -d)) * L) != cq || floor(contourLum(q + vec2(0.0, d)) * L) != cq;
+  if (line) return uLine;
+  return floor(c * L) / L + 0.5 / L;
+}
+
+/* 04 Noise Field（Perlin = value noise） */
+float nHash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(nHash(i), nHash(i + vec2(1.0, 0.0)), u.x), mix(nHash(i + vec2(0.0, 1.0)), nHash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+vec3 fxNoise(vec2 q){
+  vec2 tc = q / vec2(1280.0, 720.0);                    // grainrad 的 texCoord（以 1280 × 720 的畫面計）
+  float at = uTime * ${N(P.noise.speed)};
+  vec2 np = tc * ${N(P.noise.scale)} + vec2(at * 0.1);
+  float n1 = 0.5 * vnoise(np), n2 = 0.5 * vnoise(np + vec2(100.0));   // 1 octave
+  vec2 disp = (vec2(n1, n2) - 0.5) * 2.0 * ${N(P.noise.intensity)} * 0.02;
+  vec3 c = bc(cam(clamp(q + disp * vec2(1280.0, 720.0), vec2(0.0), uGridG)), ${N(bri(P.noise.brightness))}, ${N(con(P.noise.contrast))});
+  float overlay = 0.5 * vnoise(tc * ${N(P.noise.scale * 2)} + at) * 0.1;
+  return clamp(c + overlay * ${N(P.noise.intensity)} * 0.3, 0.0, 1.0);
+}
+
+/* 05 Blockify */
+vec3 fxBlockify(vec2 q){
+  float s = ${N(P.blockify.blockSize)};
+  return bc(cam((floor(q / s) + 0.5) * s), ${N(bri(P.blockify.brightness))}, ${N(con(P.blockify.contrast))});
+}
+
+/* 06 Dithering（Bayer 8×8） */
+float m2(vec2 b){ return 2.0 * b.x + 3.0 * b.y - 4.0 * b.x * b.y; }
+float bayer8(vec2 p){
+  p = mod(p, 8.0);
+  vec2 b0 = mod(p, 2.0), b1 = mod(floor(p / 2.0), 2.0), b2 = floor(p / 4.0);
+  return (16.0 * m2(b0) + 4.0 * m2(b1) + m2(b2)) / 64.0;
+}
+vec3 fxDither(vec2 q){
+  float g = ${N(P.dithering.matrix)};
+  vec2 bp = floor(q / g);
+  vec3 base = cam(bp * g);
+  vec3 adj = pow(max(bc(base, ${N(bri(P.dithering.brightness))}, ${N(con(P.dithering.contrast))}), vec3(0.001)), vec3(${N(1 / P.dithering.gamma)}));
+  return luma(adj) >= bayer8(bp) ? base : vec3(0.0);   // 背景黑
+}
+
+/* 07 Dots（Diamond、Square Grid） */
+vec3 fxDots(vec2 q){
+  float sp = 8.0 * ${N(P.dots.spacing)};
+  vec2 cc = (floor(q / sp) + 0.5) * sp;
+  vec3 c = bc(cam(cc), ${N(bri(P.dots.brightness))}, ${N(con(P.dots.contrast))});
+  vec2 lp = abs(q - cc);
+  float radius = sp * 0.4 * ${N(P.dots.size)} * (0.2 + luma(c) * 0.8);
+  return (lp.x + lp.y) < radius * 1.4 ? c : vec3(0.0);
+}
+
+/* 08 Voronoi（Cell Average） */
+vec2 vHash(vec2 p){
+  vec2 k = vec2(0.3183099, 0.3678794);
+  vec2 pp = p * k + k.yx;
+  return fract(16.0 * k * fract(pp.x * pp.y * (pp.x + pp.y))) * 2.0 - 1.0;
+}
+vec3 fxVoronoi(vec2 q){
+  float cs = ${N(P.voronoi.cellSize)};
+  vec2 sp = q / cs, ip = floor(sp), fp = fract(sp), best = ip;
+  float md = 8.0;
+  for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+    vec2 n = vec2(float(x), float(y));
+    vec2 pt = n + 0.5 + vHash(ip + n) * ${N(P.voronoi.randomize)} * 0.5;
+    float d = length(pt - fp);
+    if (d < md) { md = d; best = ip + n; }
+  }
+  vec3 sum = vec3(0.0);
+  for (int y = -2; y <= 2; y++) for (int x = -2; x <= 2; x++) sum += cam((best + 0.5 + vec2(float(x), float(y)) * 0.2) * cs);
+  return bc(sum / 25.0, ${N(bri(P.voronoi.brightness))}, ${N(con(P.voronoi.contrast))});
+}
+
+/* 09 Threshold（6 階、Original） */
+vec3 fxThreshold(vec2 q){
+  vec3 c = bc(cam(q), ${N(bri(P.threshold.brightness))}, ${N(con(P.threshold.contrast))});
+  float L = ${N(P.threshold.levels)} - 1.0;
+  return clamp(floor(c * L + 0.5) / L, 0.0, 1.0);
+}
+
 void main(){
-  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) - uOrigin;   // 以九宮格左上角為原點，往下為正
+  vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) - uOrigin;   // 以九宮格左上角為原點，往下為正（裝置像素）
   vec2 stp = uCard + uGap;
   vec2 ij = floor(p / stp);
   vec3 col = uBg;
   if (ij.x >= 0.0 && ij.x < 3.0 && ij.y >= 0.0 && ij.y < 3.0) {
-    vec2 l = p - ij * stp;                                             // 格子內的位置
-    vec2 q = abs(l - uCard * 0.5) - (uCard * 0.5 - uRadius);
-    float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uRadius;   // 圓角
-    float inside = clamp(0.5 - d, 0.0, 1.0);
+    vec2 l = p - ij * stp;
+    vec2 r = abs(l - uCard * 0.5) - (uCard * 0.5 - uRadius);
+    float inside = clamp(0.5 - (length(max(r, 0.0)) + min(max(r.x, r.y), 0.0) - uRadius), 0.0, 1.0);   // 圓角
     if (inside > 0.0) {
+      vec2 q = p / uUnit;                                   // grainrad 的像素座標
       float k = ij.y * 3.0 + ij.x;
-      vec2 cell = floor(l / uChar), f = fract(l / uChar);
-      // 每個字元格子取 2×2 個點的平均亮度
-      float b = 0.0;
-      if (uHasCam > 0.5) {
-        b += luma((cell + vec2(0.25, 0.25)) * uChar / uCard);
-        b += luma((cell + vec2(0.75, 0.25)) * uChar / uCard);
-        b += luma((cell + vec2(0.25, 0.75)) * uChar / uCard);
-        b += luma((cell + vec2(0.75, 0.75)) * uChar / uCard);
-        b *= 0.25;
-      }
-      float len = 1.0;
-      for (int i = 0; i < 9; i++) { if (float(i) == k) len = uLen[i]; }
-      float idx = floor(clamp(b, 0.0, 0.9999) * len);                 // 亮度平均分配到字符組
-      f = clamp(f, vec2(0.02), vec2(0.98));
-      float g = texture2D(uAtlas, (vec2(idx, k) + f) / uAtlasGrid).r;
-      vec3 c = mix(uCardCol, uCharCol, g);
-      c += (hash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain;
+      vec3 c;
+      if (k < 0.5) c = fxHalftone(q);
+      else if (k < 1.5) c = fxAscii(q);
+      else if (k < 2.5) c = fxContour(q);
+      else if (k < 3.5) c = fxNoise(q);
+      else if (k < 4.5) c = fxBlockify(q);
+      else if (k < 5.5) c = fxDither(q);
+      else if (k < 6.5) c = fxDots(q);
+      else if (k < 7.5) c = fxVoronoi(q);
+      else c = fxThreshold(q);
+      c += (grainHash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain;
       col = mix(uBg, c, inside);
     }
   }
@@ -188,14 +319,11 @@ void main(){
 
   const u = n => gl.getUniformLocation(prog, n);
   const U = {};
-  for (const n of ['uHasCam', 'uRes', 'uOrigin', 'uCard', 'uChar', 'uCamScale', 'uSeed', 'uGap', 'uRadius', 'uGrainPx']) U[n] = u(n);
+  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uGap', 'uRadius', 'uGrainPx', 'uRes', 'uOrigin', 'uCard', 'uGridG', 'uCamScale', 'uSeed']) U[n] = u(n);
   gl.uniform1i(u('uCam'), 0);
   gl.uniform1i(u('uAtlas'), 1);
-  gl.uniform2f(u('uAtlasGrid'), MAX_LEN, CHARSETS.length);
-  gl.uniform1fv(u('uLen'), new Float32Array(CHARSETS.map(c => Array.from(c.chars).length)));
-  gl.uniform3fv(u('uCharCol'), hex(CHAR_COLOR));
-  gl.uniform3fv(u('uCardCol'), hex(CARD_COLOR));
   gl.uniform3fv(u('uBg'), hex(BG_COLOR));
+  gl.uniform3fv(u('uLine'), hex(P.contour.lineColor));
   gl.uniform1f(u('uGrain'), GRAIN_AMOUNT);
 
   let texW = 0, texH = 0, fresh = true, watching = null;
@@ -207,7 +335,7 @@ void main(){
   };
 
   return {
-    draw(video, L) {
+    draw(video, L, time) {
       if (gl.isContextLost()) return;
       gl.activeTexture(gl.TEXTURE0);
       let V = 1;
@@ -222,15 +350,18 @@ void main(){
         V = vw / vh;
       }
       const Wd = canvas.width, Hd = canvas.height, d = Wd / L.W;   // d：每個 CSS px 有幾個像素
-      const A = CARD_W / CARD_H;
+      const unit = L.gh / 720 * EFFECT_SCALE;                      // 每個 grainrad 像素是幾個 CSS px
+      const A = L.gw / L.gh;
       gl.viewport(0, 0, Wd, Hd);
       gl.uniform1f(U.uHasCam, video ? 1 : 0);
+      gl.uniform1f(U.uUnit, unit * d);
+      gl.uniform1f(U.uTime, time || 0);
       gl.uniform2f(U.uRes, Wd, Hd);
       gl.uniform2f(U.uOrigin, L.x * d, L.y * d);
       gl.uniform2f(U.uCard, L.cw * d, L.ch * d);
-      gl.uniform2f(U.uChar, CHAR_H * 0.6 * L.s * d, CHAR_H * L.s * d);
       gl.uniform1f(U.uGap, GAP * d);
       gl.uniform1f(U.uRadius, RADIUS * d);
+      gl.uniform2f(U.uGridG, L.gw / unit, L.gh / unit);
       gl.uniform2f(U.uCamScale, A > V ? 1 : A / V, A > V ? V / A : 1);
       gl.uniform2f(U.uSeed, Math.random() * 1000, Math.random() * 1000);
       gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
