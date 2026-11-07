@@ -12,8 +12,6 @@
    背景和所有東西都加上和其他畫面一樣的顆粒。
    ========================================================================== */
 
-import { isPhone } from '../stage.js';
-
 /* ---------- 可以調整的數字 ---------- */
 const START = 70552;                     // 開始（毫秒；字從這一刻開始飛）
 const BG_COLOR = '#313131';
@@ -49,6 +47,11 @@ const STEP = 1 / 240;                    // 物理每一步的時間（秒；字
 
 const hex = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
 const clamp01 = x => Math.max(0, Math.min(1, x));
+// 手機：觸控、而且螢幕短邊不超過 600px（和 stage.js 的判斷一樣；寫在這裡，這個檔就不必等 stage.js 更新）
+const isPhone = () => {
+  try { return (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0) && Math.min(screen.width, screen.height) <= 600; }
+  catch (e) { return false; }
+};
 const rnd = ([a, b]) => a + Math.random() * (b - a);
 
 export default {
