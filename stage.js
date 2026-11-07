@@ -20,6 +20,7 @@
    ・相機、陀螺儀、聲音由這裡在「點擊開始」時統一開一次，互動只拿來用。
    ・歌曲用 <audio> 播放，不用 Web Audio：iPhone 用 Web Audio 發出聲音的那一刻會有一聲爆音。
      互動裡如果要加音效，也請用 <audio>，不要用 Web Audio。
+     唯一的例外是 iPhone 上調音量（replay 的淡出）：iPhone 不能用程式調 <audio> 的音量，見下方 audio.setVolume。
 
    網址參數：
    ?from=29800&to=40628   單獨開發時覆蓋播放範圍（毫秒）
@@ -93,6 +94,13 @@ const shared = {
   width: innerWidth, height: innerHeight,
   dpr: Math.min(2, window.devicePixelRatio || 1),
   get duration() { return audio.duration; },
+  // 控制歌曲（replay 用）：
+  //   stage.volume(0–1)  調音量
+  //   stage.stopMusic()  停在現在的位置（時間跟著停住）
+  //   stage.restart()    從頭開始播（音量回到 1；開發時網址有 from= 就回到 from）。要在點擊的當下呼叫
+  volume(v) { audio.setVolume(v); },
+  stopMusic() { if (audio.playing) { audio.pause(); hud.syncButtons(); } },
+  restart() { director.restart(); audio.setVolume(1); hud.syncButtons(); },
 };
 
 /* ---------- 音樂時鐘 ----------
@@ -105,6 +113,7 @@ const audio = {
   running: false,      // 時間是否在走（真的開始出聲之後才算）
   pos: 0, anchorT: 0, anchorP: 0, lastCT: -1, lastOut: 0, unlocking: false, unlocked: false,
   armed: false, armCT: 0,  // 收到 playing／seeked 之後，等 currentTime 真的開始走才起算（不然時鐘會先跑到前面再被拉回來）
+  vol: 1, volOK: null, ctx: null, gain: null,   // 音量（見 setVolume）
   get playing() { return !!this.el && !this.el.paused && !this.el.ended; },
   get duration() { return this.dur; },
   attach(url) {
@@ -177,6 +186,49 @@ const audio = {
     this.pos = this.now();
     this.running = false;
     this.el.pause();
+  },
+  // 音量 0–1
+  // ・電腦、Android：直接調 <audio> 的音量。
+  // ・iPhone：<audio> 的音量不能用程式調，只能把 <audio> 接到 Web Audio 的音量上。
+  //   iPhone 的 Web Audio 啟動時可能有一聲爆音，所以不在按 PLAY 時啟動：觀眾在 MV 裡點畫面時才順便準備好
+  //   （iPhone 只允許在點擊的當下啟動），要調音量時才真的接上。
+  //   觀眾從頭到尾沒點過畫面的話，iPhone 上就沒辦法淡出（音量維持原樣，時間到才停）。
+  canSetVolume() {
+    if (this.volOK == null && this.el) {
+      const v = this.el.volume;
+      this.el.volume = 0.5;
+      this.volOK = Math.abs(this.el.volume - 0.5) < 0.01;   // iPhone 會維持 1
+      this.el.volume = v;
+    }
+    return !!this.volOK;
+  },
+  prepareVolume() {          // 點擊的當下呼叫
+    if (!this.el || this.canSetVolume()) return;
+    try {
+      if (!this.ctx) {
+        try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}   // 靜音開關打開也有聲音
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        this.ctx = new AC();
+      }
+      if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
+    } catch (e) { this.ctx = null; }
+  },
+  setVolume(v) {
+    v = clamp01(v);
+    if (!this.el || Math.abs(v - this.vol) < 1e-4) return;
+    if (this.canSetVolume()) { this.el.volume = v; this.vol = v; return; }
+    if (!this.gain) {
+      // Web Audio 沒在跑就不接（接上去會整個沒聲音）
+      if (v >= 1 || !this.ctx || this.ctx.state !== 'running') return;
+      try {
+        const src = this.ctx.createMediaElementSource(this.el);
+        this.gain = this.ctx.createGain();
+        src.connect(this.gain); this.gain.connect(this.ctx.destination);
+      } catch (e) { this.gain = null; return; }
+    }
+    this.gain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.02);
+    this.vol = v;
   },
   seek(t) {
     if (!this.el) return;
@@ -712,6 +764,8 @@ const hud = {
 };
 function togglePlay() { audio.playing ? audio.pause() : audio.play(); hud.syncButtons(); }
 function toggleLoop() { director.loop = !director.loop; hud.syncButtons(); }
+// iPhone：觀眾在 MV 裡點畫面時順便把調音量用的 Web Audio 準備好（見 audio.setVolume）
+addEventListener('pointerdown', () => { if (started) audio.prepareVolume(); }, true);
 addEventListener('keydown', e => {
   if (!hud.enabled || !started) return;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
