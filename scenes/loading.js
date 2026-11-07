@@ -62,7 +62,7 @@ const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 
 export default {
   type: 'loading',
-  name: '載入畫面',
+  name: 'loading',
 
   // el：全螢幕的容器；ctx.asset(p)：把相對路徑換成網址
   mount(el, ctx) {

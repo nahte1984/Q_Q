@@ -28,7 +28,7 @@ const INTRO = 2000;                      // 整個進場（毫秒）
 const CARD_FADE = 500;                   // 每一格淡入花多久（毫秒）；九格的開始時間平均分散在剩下的時間裡
 
 /* ---------- 點畫面：九個格子隨機換位子 ---------- */
-const TAP_FADE = 400;                    // 每一格重新淡入花多久（毫秒）
+const TAP_FADE = 600;                    // 每一格重新淡入花多久（毫秒）
 const TAP_SPREAD = 200;                  // 九格的淡入開始時間在這段時間裡隨機錯開（毫秒；0 = 九格一起淡入）
 const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
                                          // false：只有效果換位子，畫面還是完整的
@@ -42,7 +42,7 @@ const EFFECT_SCALE = 1;
 /* ---------- 九種效果的參數（照截圖） ---------- */
 const FX = {
   halftone:  { brightness: 15, contrast: 0, spacing: 11, angle: 45 },               // 01 Circle、Original
-  ascii:     { brightness: 25, contrast: 0, scale: 3, spacing: 0.3 },                // 02 DETAILED、Original、背景黑
+  ascii:     { brightness: 25, contrast: 0, scale: 2, spacing: 0.3 },                // 02 DETAILED、Original、背景黑
   contour:   { brightness: 30, contrast: -5, levels: 6, lineThickness: 0.5, lineColor: '#e0714f' },   // 03 Filled Bands、Original
   noise:     { brightness: 13, contrast: -5, scale: 100, intensity: 3, speed: 0.1 },  // 04 Perlin、1 octave、Animate
   blockify:  { brightness: 10, contrast: 0, blockSize: 15 },                         // 05 Full Blocks、Preserve Colors
