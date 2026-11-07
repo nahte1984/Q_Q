@@ -19,6 +19,7 @@
    小圖案：每一輪掃描時，畫面上隨機的位置一秒冒出 6 個小圖案，顏色從五個顏色裡隨機挑，出現了就一直留著。
      第一輪冒出小圓點，第二輪冒出小星星，第三輪冒出小愛心（形狀和磁頭一樣）。
    大小照 _references/slitSymbol.png；落點可以到畫面邊緣（最多只看得到一半的形狀）。
+   點擊畫面：點的地方附近很快地一個接一個累積一堆小圖案（形狀跟著當下那一輪，顏色隨機），一樣一直留著。
 
    和 oooslit 的差別：
    ・全部用 WebGL 在顯示卡上畫（oooslit 每一幀都用 2D canvas 剪一個圓環再貼整張鏡頭畫面）
@@ -59,6 +60,10 @@ const REVEAL = {
 const SHAPE_COLORS = ['#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3'];   // Figma Page 1 左邊那五個
 const SHAPE_SIZE = [19, 25, 24];         // 每一輪小圖案的寬度（px）：圓點直徑、星星、愛心（照 slitSymbol.png）
 const SHAPES_PER_SEC = 6;                // 一秒冒出幾個
+// 點擊畫面：點的地方附近很快地累積一堆小圖案
+const TAP_SHAPES = 14;                   // 點一下冒出幾個
+const TAP_TIME = 450;                    // 這些一個接一個冒完花多久（毫秒）
+const TAP_RADIUS = 45;                   // 落在點的位置周圍多遠以內（px；越靠近點的地方越密）
 
 /* ---------- 形狀 → 每個角度上外框離中心多遠 ---------- */
 const BINS = 1024;   // 角度切成幾份
@@ -88,6 +93,8 @@ export default {
     this.dctx = this.dots.getContext('2d');
     this.kmax = [];
     this.shapes = [];
+    this.bursts = [];     // 點擊後還在冒的小圖案
+    stage.root.addEventListener('pointerdown', e => this.tap(stage, e));
     // 最後的背景：一層蓋在最上面的畫面，用五角星的外框當遮罩
     const [star] = await Promise.all([stage.file(REVEAL.shape).then(radialFromSVG), stage.font('22px "BIZ UDPMincho"', REVEAL.lines.join(''))]);
     let rmax = 0;
@@ -115,6 +122,7 @@ export default {
   /* ---------- 小圖案 ---------- */
   clearShapes() {
     this.shapes = [];
+    this.bursts = [];
     this.count = ROUNDS.map(() => 0);   // 每一輪已經冒出幾個
     this.dctx.setTransform(1, 0, 0, 1, 0, 0);
     this.dctx.clearRect(0, 0, this.dots.width, this.dots.height);
@@ -149,6 +157,27 @@ export default {
         this.drawShape(sh, W, H);
       }
     });
+    // 點擊後的小圖案：照音樂時間一個接一個冒出來
+    for (let b = this.bursts.length - 1; b >= 0; b--) {
+      const bu = this.bursts[b];
+      const want = Math.min(TAP_SHAPES, Math.floor(Math.max(0, ms - bu.at) / TAP_TIME * TAP_SHAPES) + 1);
+      while (bu.n < want) {
+        const a = Math.random() * Math.PI * 2, r = TAP_RADIUS * Math.random();
+        const sh = { type: bu.type, x: (bu.x + Math.cos(a) * r) / W, y: (bu.y + Math.sin(a) * r) / H, color: SHAPE_COLORS[(Math.random() * SHAPE_COLORS.length) | 0] };
+        this.shapes.push(sh);
+        bu.n++;
+        this.drawShape(sh, W, H);
+      }
+      if (bu.n >= TAP_SHAPES) this.bursts.splice(b, 1);
+    }
+  },
+  // 點擊畫面：記下位置和當下是第幾輪（決定形狀）
+  tap(stage, e) {
+    if (this.shapesMs == null) return;
+    const rect = stage.root.getBoundingClientRect();
+    let type = 0;
+    for (let j = 0; j < ROUNDS.length; j++) if (this.shapesMs >= ROUNDS[j].from) type = j;
+    this.bursts.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, type, at: this.shapesMs, n: 0 });
   },
 
   // 磁頭要長到多大，整個形狀才會完全在畫面外

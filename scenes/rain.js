@@ -6,6 +6,7 @@
                之後落下的符號有顏色（Figma 那五個顏色用隨機的順序循環、慢慢漸變），碰到頭會彈開
    15000 ms    「每個人都是一種文體」拆成一個一個白色的字，打散混在符號裡落下
    18000 ms    「你覺得你是哪一種」拆成一個一個白色的字，打散混在符號裡落下
+   點擊畫面     點的地方附近的符號被推開、散開（越近推得越遠），推力慢慢消失之後繼續往下落
 
    效能：符號在載入時先畫成一張小圖集（每個符號 × 白色＋漸變的每一階顏色），之後每幀只是貼圖。
    臉部偵測（Blazeface）在背景執行緒跑，不會卡住動畫。
@@ -49,6 +50,12 @@ const SPEED = 0.5;
 const SPAWN_PER_SEC = w => (15 + w * 0.085) * SPEED;
 const FALL_MIN = 170 * SPEED, FALL_MAX = 420 * SPEED;   // 落下速度（px/秒）
 const GRAVITY = 1080 * SPEED * SPEED;                   // 彈開後的重力
+
+// 點擊畫面：附近的符號散開
+const TAP_RADIUS = 140;                  // 點的地方周圍多遠以內的符號會被推開（px）
+const TAP_PUSH = 900;                    // 推開的速度（px/秒，正中間的最大，越外圈越小；也會乘上 SPEED）
+const TAP_DRAG = 2.5;                    // 推力消失得多快（越大越快停下來；正中間的符號大約被推開 TAP_PUSH × SPEED ÷ TAP_DRAG px）
+const TAP_SPIN = 6;                      // 推開時加上的自轉（弧度/秒，隨機方向）
 
 const MODEL_URL = '../models/blazeface/model.json';   // 臉部偵測模型（從 purpleRain 搬來）
 
@@ -136,10 +143,18 @@ export default {
 
     this.drops = [];
     this.lastCamA = -1;
+
+    // 6. 點擊畫面：記下位置，下一幀把附近的符號推開
+    this.taps = [];
+    root.addEventListener('pointerdown', e => {
+      const r = root.getBoundingClientRect();
+      this.taps.push({ x: e.clientX - r.left, y: e.clientY - r.top });
+    });
   },
 
   enter(stage, f) {
     this.drops = [];
+    this.taps = [];
     this.acc = 0;
     this.lastMs = f.t * 1000;
     this.done = PHRASES.map(p => this.lastMs > p.at + 300);   // 從中途進場時，已經過了的句子就不補
@@ -147,6 +162,7 @@ export default {
 
   exit() {
     this.drops = [];
+    this.taps = [];
     this.faces = [];
     this.camCanvas.style.opacity = 0;
     this.lastCamA = -1;
@@ -189,8 +205,24 @@ export default {
       });
     }
 
+    // 點擊：附近的符號往外推開
+    const drops = this.drops;
+    for (const tp of this.taps) {
+      for (const p of drops) {
+        const dx = p.x - tp.x, dy = p.y - tp.y, dist = Math.hypot(dx, dy);
+        if (dist >= TAP_RADIUS) continue;
+        const near = 1 - dist / TAP_RADIUS;                                    // 1 = 正中間，0 = 最外圈
+        const a = (dist > 1 ? Math.atan2(dy, dx) : Math.random() * Math.PI * 2) + (Math.random() - 0.5) * 0.5;
+        const sp = TAP_PUSH * SPEED * (0.35 + 0.65 * near) * (0.8 + Math.random() * 0.4);
+        p.px = (p.px || 0) + Math.cos(a) * sp;
+        p.py = (p.py || 0) + Math.sin(a) * sp;
+        p.pr = (p.pr || 0) + (Math.random() < 0.5 ? -1 : 1) * TAP_SPIN * SPEED * (0.3 + 0.7 * near);
+      }
+    }
+    this.taps.length = 0;
+
     // 移動、碰撞、畫出來
-    const g = this.g, atlas = this.atlas, drops = this.drops;
+    const g = this.g, atlas = this.atlas;
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, this.canvas.width, this.canvas.height);
     for (let i = drops.length - 1; i >= 0; i--) {
@@ -218,6 +250,13 @@ export default {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         p.rot += p.vr * dt;
+        // 被點擊推開的速度：慢慢消失
+        if (p.px || p.py || p.pr) {
+          const keep = Math.exp(-TAP_DRAG * dt), move = (1 - keep) / TAP_DRAG;
+          p.x += p.px * move; p.y += p.py * move; p.rot += p.pr * move;
+          p.px *= keep; p.py *= keep; p.pr *= keep;
+          if (Math.abs(p.px) + Math.abs(p.py) < 0.5) p.px = p.py = p.pr = 0;
+        }
       }
       const m = p.size;
       if (p.y - m > H || p.x < -m || p.x > W + m) { drops[i] = drops[drops.length - 1]; drops.pop(); continue; }
