@@ -11,13 +11,17 @@
    背景和所有東西都加上和其他畫面一樣的顆粒。
    ========================================================================== */
 
+import { isPhone } from '../stage.js';
+
 /* ---------- 可以調整的數字 ---------- */
 const START = 70552;                     // 開始（毫秒；字從這一刻開始飛）
 const BG_COLOR = '#313131';
 // 字（和 slit 最後的背景一樣：BIZ UDPMincho 22px、行高 27px、#F8EFCE，直排在畫面正中央；空字串 = 空一行）
 const LINES = ['看', '故', '事', '謎', '底', '', '玩', '解', '讀', '遊', '戲'];
 const FONT_SIZE = 22, LINE_HEIGHT = 27, FONT = '"BIZ UDPMincho"', TEXT_COLOR = '#f8efce';
-const SPEED = [240, 480];                // 每個字的速度（px/秒，隨機在這個範圍內，一直維持不變）
+// 每個字的速度（px/秒，隨機在這個範圍內，一直維持不變）；手機畫面小，速度是桌機的一半
+const SPEED_DESKTOP = [240, 480];
+const SPEED_PHONE = [120, 240];
 const SPIN = [40, 140];                  // 自轉速度（度/秒，方向隨機）
 const SPREAD = 70;                       // 飛出去的方向：從畫面中心往外的方向左右隨機偏多少度
 const HIT_RADIUS = 0.45;                 // 碰撞半徑（字的大小的幾倍）
@@ -87,7 +91,7 @@ export default {
       // 從畫面中心往外的方向（直排在中線上，所以是往上或往下），再左右隨機偏一點
       const out = y < L.H / 2 ? -Math.PI / 2 : Math.PI / 2;
       const a = out + (Math.random() * 2 - 1) * SPREAD * Math.PI / 180;
-      const sp = rnd(SPEED);
+      const sp = rnd(isPhone() ? SPEED_PHONE : SPEED_DESKTOP);
       return {
         x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, speed: sp,
         rot: 0, spin: (Math.random() < 0.5 ? -1 : 1) * rnd(SPIN) * Math.PI / 180,
