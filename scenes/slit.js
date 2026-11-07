@@ -12,8 +12,8 @@
    背景色 #313131（第一輪還沒掃到的地方）。
    鏡頭畫面套 lut/color.CUBE 的調色（和 rain 一樣，設定在 lut.js）。
 
-   64482 – 69260 ms  五角星（images/slit-5star.svg）像遮罩一樣從畫面中心由最小長到最大，
-              星星裡面慢慢露出背景（#313131），最後整個畫面都是背景；
+   64482 – 69260 ms  圓形像遮罩一樣從畫面中心由最小長到填滿畫面，
+              圓形裡面慢慢露出背景（#313131），最後整個畫面都是背景；
    68105 ms   背景上直排的「看故事謎底玩解讀遊戲」淡入（Figma Page 1）。
 
    小圖案：每一輪掃描時，畫面上隨機的位置一秒冒出 6 個小圖案，顏色從五個顏色裡隨機挑，出現了就一直留著。
@@ -44,10 +44,10 @@ const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;
 // 解析度上限（2 倍就很清楚；鏡頭畫面本身也沒有更細）
 const MAX_DPR = 2;
 
-// 最後：五角星形的遮罩從畫面中心由小到大，裡面露出背景
+// 最後：圓形的遮罩從畫面中心由小到大，裡面露出背景
 const REVEAL = {
-  shape: '../images/slit-5star.svg',
-  from: 64482, to: 69260,               // 從最小長到整個畫面都在星星裡（毫秒）
+  shape: 'circle',                       // 遮罩的形狀：'circle' 或 SVG 檔（例如原本的 '../images/slit-5star.svg'）
+  from: 64482, to: 69260,               // 從最小長到整個畫面都在遮罩裡（毫秒）
   bg: '#313131',
   // 背景上的字（Figma：BIZ UDPMincho 22px、行高 27px、#F8EFCE，直排置中）；空字串 = 空一行
   lines: ['看', '故', '事', '謎', '底', '', '玩', '解', '讀', '遊', '戲'],
@@ -95,15 +95,16 @@ export default {
     this.shapes = [];
     this.bursts = [];     // 點擊後還在冒的小圖案
     stage.root.addEventListener('pointerdown', e => this.tap(stage, e));
-    // 最後的背景：一層蓋在最上面的畫面，用五角星的外框當遮罩
-    const [star] = await Promise.all([stage.file(REVEAL.shape).then(radialFromSVG), stage.font('22px "BIZ UDPMincho"', REVEAL.lines.join(''))]);
-    let rmax = 0;
-    for (let k = 0; k < star.poly.length; k += 2) rmax = Math.max(rmax, Math.hypot(star.poly[k], star.poly[k + 1]));
-    this.star = { R: star.R, poly: star.poly, rmax };
+    // 最後的背景：一層蓋在最上面的畫面，用 REVEAL.shape 的外框當遮罩
+    const [mask] = await Promise.all([
+      REVEAL.shape === 'circle' ? { R: new Float32Array(BINS).fill(1) } : stage.file(REVEAL.shape).then(radialFromSVG),
+      stage.font('22px "BIZ UDPMincho"', REVEAL.lines.join('')),
+    ]);
+    this.mask = { R: mask.R };
     // 這一層也用 WebGL 畫（和下面的鏡頭一樣加顆粒），蓋在小圖案上面
     this.revealCanvas = stage.canvas({ dpr: Math.min(MAX_DPR, window.devicePixelRatio || 1) });
     this.revealCanvas.style.pointerEvents = 'none';
-    this.revealGL = revealLayer(this.revealCanvas, this.star.R);
+    this.revealGL = revealLayer(this.revealCanvas, this.mask.R);
     this.revealOn = true; this.showReveal(false);
     this.revealK = -1;
   },
@@ -185,7 +186,7 @@ export default {
     if (!this.kmax[i]) this.kmax[i] = reach(stage, this.radial[i], stage.width / 2, stage.height / 2);
     return this.kmax[i];
   },
-  // 五角星遮罩：從畫面中心由最小長到整個畫面都在星星裡
+  // 最後的遮罩：從畫面中心由最小長到整個畫面都在遮罩裡
   showReveal(on) {
     if (this.revealOn === on) return;
     this.revealOn = on;
@@ -195,7 +196,7 @@ export default {
   updateReveal(stage, ms) {
     if (!this.revealGL) return;
     const W = stage.width, H = stage.height;
-    if (!this.revealMax) this.revealMax = reach(stage, this.star.R, W / 2, H / 2);
+    if (!this.revealMax) this.revealMax = reach(stage, this.mask.R, W / 2, H / 2);
     const k = ms < REVEAL.from ? 0 : clamp01((ms - REVEAL.from) / (REVEAL.to - REVEAL.from)) * this.revealMax;
     this.showReveal(k > 0);
     if (k <= 0) return;
@@ -229,7 +230,7 @@ export default {
         this.last = cur;
       }
     }
-    // 最後：五角星遮罩由小到大，露出背景
+    // 最後：圓形遮罩由小到大，露出背景
     this.updateReveal(stage, ms);
     this.lastMs = ms;
     this.gl.show();
@@ -295,7 +296,7 @@ function radialFromSVG(buf) {
   return { R, poly };
 }
 
-/* ---------- 最後的背景：五角星遮罩裡露出 #313131 和直排的字，加顆粒 ---------- */
+/* ---------- 最後的背景：遮罩（圓形）裡露出 #313131 和直排的字，加顆粒 ---------- */
 function revealLayer(canvas, R) {
   const gl = canvas.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: true, depth: false, stencil: false });
   if (!gl) return null;
@@ -323,7 +324,7 @@ float radiusAt(float a){
 float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 void main(){
   vec2 p = (gl_FragCoord.xy - uRes * 0.5) / uD;  p.y = -p.y;      // 以畫面中心為原點（CSS px，往下為正）
-  float m = clamp((uK * radiusAt(atan(p.y, p.x)) - length(p)) * uD + 0.5, 0.0, 1.0);   // 星星裡面 = 1（邊緣柔化一個像素）
+  float m = clamp((uK * radiusAt(atan(p.y, p.x)) - length(p)) * uD + 0.5, 0.0, 1.0);   // 遮罩裡面 = 1（邊緣柔化一個像素）
   if (m <= 0.0) discard;
   float t = texture2D(uText, vec2(gl_FragCoord.x / uRes.x, 1.0 - gl_FragCoord.y / uRes.y)).a * uTextA;
   vec3 c = mix(uBg, uFg, t);
@@ -361,7 +362,7 @@ void main(){
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
     return t;
   };
-  // 星星的形狀表（16 位元，和磁頭一樣）
+  // 遮罩的形狀表（16 位元，和磁頭一樣）
   tex(0, gl.NEAREST);
   const data = new Uint8Array(BINS * 4);
   for (let b = 0; b < BINS; b++) { const v = Math.round(clamp01(R[b]) * 65535); data[b * 4] = v >> 8; data[b * 4 + 1] = v & 255; data[b * 4 + 3] = 255; }
@@ -391,7 +392,7 @@ void main(){
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
   };
   return {
-    // k：星星的大小（CSS px，最遠的尖端到中心）；scale：字的縮放；textA：字的透明度
+    // k：遮罩的大小（CSS px，外框最遠的一點到中心；圓形就是半徑）；scale：字的縮放；textA：字的透明度
     draw(stage, k, scale, textA) {
       if (gl.isContextLost()) return;
       const w = canvas.width, h = canvas.height, d = w / stage.width;
