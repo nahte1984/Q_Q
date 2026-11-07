@@ -12,6 +12,10 @@
    背景色 #313131（第一輪還沒掃到的地方）。
    鏡頭畫面套 lut/color.CUBE 的調色（和 rain 一樣，設定在 lut.js）。
 
+   小圖案：每一輪掃描時，畫面上隨機的位置一秒冒出 6 個小圖案，顏色從五個顏色裡隨機挑，出現了就一直留著。
+     第一輪冒出小圓點，第二輪冒出小星星，第三輪冒出小愛心（形狀和磁頭一樣）。
+   大小照 _references/slitSymbol.png；落點可以到畫面邊緣（最多只看得到一半的形狀）。
+
    和 oooslit 的差別：
    ・全部用 WebGL 在顯示卡上畫（oooslit 每一幀都用 2D canvas 剪一個圓環再貼整張鏡頭畫面）
    ・每一幀只處理磁頭這一幀掃過的那一圈，而且只算磁頭外框以內的範圍
@@ -35,6 +39,11 @@ const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;
 // 解析度上限（2 倍就很清楚；鏡頭畫面本身也沒有更細）
 const MAX_DPR = 2;
 
+// 小圖案
+const SHAPE_COLORS = ['#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3'];   // Figma Page 1 左邊那五個
+const SHAPE_SIZE = [19, 25, 24];         // 每一輪小圖案的寬度（px）：圓點直徑、星星、愛心（照 slitSymbol.png）
+const SHAPES_PER_SEC = 6;                // 一秒冒出幾個
+
 /* ---------- 形狀 → 每個角度上外框離中心多遠 ---------- */
 const BINS = 1024;   // 角度切成幾份
 
@@ -49,24 +58,69 @@ export default {
   async preload(stage) {
     // 每一輪的形狀算成「角度 → 外框半徑」的表（最遠的一點 = 1）
     const [radial, lut] = await Promise.all([
-      Promise.all(ROUNDS.map(async r => (r.shape === 'circle' ? new Float32Array(BINS).fill(1) : radialFromSVG(await stage.file(r.shape))))),
+      Promise.all(ROUNDS.map(async r => (r.shape === 'circle' ? { R: new Float32Array(BINS).fill(1), poly: null } : radialFromSVG(await stage.file(r.shape))))),
       CAMERA_LUT ? stage.file(CAMERA_LUT).then(parseCube).catch(err => { console.warn('調色檔沒有套用：', err); return null; }) : null,
     ]);
-    this.radial = radial;
+    this.radial = radial.map(r => r.R);
+    this.polys = radial.map(r => r.poly);
     this.canvas = stage.canvas({ dpr: Math.min(MAX_DPR, window.devicePixelRatio || 1) });
     this.gl = slitLayer(this.canvas, this.radial);
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，slit 不會出現');
     else if (lut) this.gl.setLut(lut);
+    // 小圖案畫在上面一層透明的畫布：冒出來時畫一次就好，之後不用重畫
+    this.dots = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
+    this.dctx = this.dots.getContext('2d');
     this.kmax = [];
+    this.shapes = [];
   },
 
   enter() {
     this.round = -1;      // 現在第幾輪
     this.last = 0;        // 上一幀磁頭的大小（CSS px）
     if (this.gl) this.gl.clear();
+    this.clearShapes();
   },
 
   resize() { this.kmax = []; },
+
+  /* ---------- 小圖案 ---------- */
+  clearShapes() {
+    this.shapes = [];
+    this.count = ROUNDS.map(() => 0);   // 每一輪已經冒出幾個
+    this.dctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.dctx.clearRect(0, 0, this.dots.width, this.dots.height);
+  },
+  drawShape(sh, W, H) {
+    const g = this.dctx, d = this.dots.width / W, poly = this.polys[sh.type], w = SHAPE_SIZE[sh.type];
+    g.setTransform(d, 0, 0, d, sh.x * W * d, sh.y * H * d);
+    g.fillStyle = sh.color;
+    g.beginPath();
+    if (!poly) g.arc(0, 0, w / 2, 0, Math.PI * 2);
+    else { for (let k = 0; k < poly.length; k += 2) g.lineTo(poly[k] * w, poly[k + 1] * w); g.closePath(); }
+    g.fill();
+  },
+  // 跟著音樂時間冒出小圖案（一秒 SHAPES_PER_SEC 個）；拖回前面就清掉重來
+  updateShapes(stage, ms) {
+    const W = stage.width, H = stage.height;
+    if (ms < this.shapesMs - 100) this.clearShapes();
+    this.shapesMs = ms;
+    // 畫布大小變了（電腦上調整視窗）：照比例重畫
+    if (this.dots.width !== this.dotsW || this.dots.height !== this.dotsH) {
+      this.dotsW = this.dots.width; this.dotsH = this.dots.height;
+      this.dctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.dctx.clearRect(0, 0, this.dots.width, this.dots.height);
+      for (const sh of this.shapes) this.drawShape(sh, W, H);
+    }
+    ROUNDS.forEach((r, j) => {
+      const want = Math.floor(Math.max(0, Math.min(ms, r.to) - r.from) / 1000 * SHAPES_PER_SEC);
+      while (this.count[j] < want) {
+        const sh = { type: j, x: Math.random(), y: Math.random(), color: SHAPE_COLORS[(Math.random() * SHAPE_COLORS.length) | 0] };
+        this.shapes.push(sh);
+        this.count[j]++;
+        this.drawShape(sh, W, H);
+      }
+    });
+  },
 
   // 磁頭要長到多大，整個形狀才會完全在畫面外
   kMax(stage, i) {
@@ -84,6 +138,7 @@ export default {
   update(stage, f) {
     if (!this.gl) return;
     const ms = f ? f.t * 1000 : 0;
+    this.updateShapes(stage, ms);
     let i = -1;
     for (let j = 0; j < ROUNDS.length; j++) if (ms >= ROUNDS[j].from) i = j;
     const v = stage.camera, video = v && v.videoWidth > 0 ? v : null;
@@ -148,7 +203,12 @@ function radialFromSVG(buf) {
   let max = 0;
   for (let b = 0; b < BINS; b++) max = Math.max(max, R[b]);
   for (let b = 0; b < BINS; b++) R[b] = Math.max(R[b] / max, 0.01);
-  return R;
+  // 小圖案用的外框（寬度 = 1，以中心為原點）
+  let minX = Infinity, maxX = -Infinity;
+  for (let k = 0; k < n; k++) { minX = Math.min(minX, pts[2 * k]); maxX = Math.max(maxX, pts[2 * k]); }
+  const step = 4, poly = new Float32Array(Math.ceil(n / step) * 2), wd = maxX - minX || 1;
+  for (let k = 0, j = 0; k < n; k += step, j += 2) { poly[j] = pts[2 * k] / wd; poly[j + 1] = pts[2 * k + 1] / wd; }
+  return { R, poly };
 }
 
 /* ---------- WebGL ---------- */
