@@ -160,7 +160,8 @@ export default {
   showReveal(on) {
     if (this.revealOn === on) return;
     this.revealOn = on;
-    this.revealCanvas.style.visibility = on ? 'visible' : 'hidden';
+    // 顯示時用 ''（跟著 slit 整層），不能寫 'visible'：那會讓這層在 slit 結束、整層隱藏之後還留在畫面上，蓋住下一個互動
+    this.revealCanvas.style.visibility = on ? '' : 'hidden';
   },
   updateReveal(stage, ms) {
     if (!this.revealGL) return;
