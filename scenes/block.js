@@ -5,7 +5,8 @@
               ・每一個字從原本的位置，隨機朝畫面周圍的方向飛出去，各自有一個隨機的等速（有快有慢），帶著自轉。
               ・所有字都飛離畫面中心之後，畫面中間長出一個 215 × 215 的方塊（Figma Page 1），
                 由許多 5 × 5 px 的小方塊組成，每個小方塊隨機淡入，一秒內全部出現。
-              ・每個小方塊取樣當下位置的鏡頭顏色，帶亂數偏移，一秒重新取樣 25 次（和 mandalaCam 一樣）。
+              ・整個鏡頭畫面的中間部分剛好鋪滿這個方塊（像 cover 一樣裁成正方形），
+                每個小方塊取樣自己位置上的鏡頭顏色，帶亂數偏移，一秒重新取樣 25 次（和 mandalaCam 一樣）。
               ・字碰到畫面邊緣會反彈；碰到中間的方塊會擊碎一些小方塊再反彈（碎片會噴開、落下、淡掉）；
                 字和字碰到也會互相反彈。反彈之後每個字還是維持自己的速度。
    背景和所有東西都加上和其他畫面一樣的顆粒。
@@ -32,7 +33,7 @@ const CELL = 5;                          // 小方塊的大小（px）
 const INTRO = 1000;                      // 所有小方塊出現完的時間（毫秒）
 const CELL_FADE = 150;                   // 每個小方塊淡入花多久（毫秒）
 const RESAMPLE = 25;                     // 每秒重新取樣幾次鏡頭顏色
-const SCATTER = 0.07;                    // 亂數取樣的範圍（鏡頭畫面長邊的比例；和 mandalaCam 一樣）
+const SCATTER = 0.07;                    // 亂數取樣的範圍（方塊邊長的比例；和 mandalaCam 相對於畫面的比例一樣）
 
 // 擊碎
 const BREAK_RADIUS = 22;                 // 碰到的地方周圍多遠的小方塊也有機會一起碎掉（px）；平均一次碎掉約 10 格
@@ -208,7 +209,7 @@ export default {
       const sp = rnd(DEBRIS_SPEED), ang = (Math.random() - 0.5) * 1.2;
       const ca = Math.cos(ang), sa = Math.sin(ang);
       this.debris.push({
-        x, y, life: 1, seed: Math.random() * 1000,
+        x, y, life: 1, u: (i + 0.5) / n, v: (j + 0.5) / n,     // u, v：這一格在方塊裡的位置（碎片一直取樣原本那一格的鏡頭顏色）
         vx: (ux * ca - uy * sa) * sp - b.vx * 0.25, vy: (ux * sa + uy * ca) * sp - b.vy * 0.25,
       });
     }
@@ -242,15 +243,16 @@ uniform float uGrain, uGrainPx;
 float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float grain(){ return (hash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain; }
 `;
-  // 鏡頭：像 cover 一樣鋪滿整個畫面、左右鏡像；在位置附近亂數取樣（三角分布，和 mandalaCam 一樣）
+  // 鏡頭：整個鏡頭畫面的中間部分像 cover 一樣鋪滿中間的方塊、左右鏡像；在位置附近亂數取樣（三角分布，和 mandalaCam 一樣）
+  // uv：方塊裡的位置（0–1）
   const camGLSL = `
 uniform sampler2D uCam;
 uniform vec2 uCamScale, uSpread;
 uniform float uHasCam, uTick;
 vec4 hash43(vec3 p){ vec4 q = fract(vec4(p.xyzx) * vec4(.1031, .1030, .0973, .1099)); q += dot(q, q.wzxy + 33.33); return fract((q.xxyz + q.yzzw) * q.zywx); }
-vec3 camAt(vec2 dev, vec2 seed){
+vec3 camAt(vec2 uv, vec2 seed){
   if (uHasCam < 0.5) return vec3(0.0);
-  vec2 t = (dev / uRes - 0.5) * uCamScale + 0.5;
+  vec2 t = (uv - 0.5) * uCamScale + 0.5;
   t.x = 1.0 - t.x;
   vec4 r = hash43(vec3(seed, uTick));
   t += vec2(r.x + r.y - 1.0, r.z + r.w - 1.0) * uSpread;
@@ -279,26 +281,26 @@ void main(){
   vec4 st = texture2D(uState, (cell + 0.5) / uN);                  // g：淡入時間；b：還在不在
   float a = st.b * clamp((uT - st.g * uIntro) / uFade, 0.0, 1.0);
   if (a <= 0.0) discard;
-  vec3 c = camAt(uRect.xy + (cell + 0.5) * uCellPx, cell);
+  vec3 c = camAt((cell + 0.5) / uN, cell);
   c = clamp(c + grain(), 0.0, 1.0);
   gl_FragColor = vec4(c * a, a);
 }`;
   // 碎片：一個點 = 一個 5px 的小方塊
   const ptVS = `
-attribute vec4 p;            // x, y（裝置像素）、透明度、亂數
+attribute vec4 p;            // x, y（裝置像素）、透明度、原本那一格在方塊裡的位置（u、v 壓成一個數字）
 uniform vec2 uRes;
 uniform float uCellPx;
 varying vec3 vInfo;
 void main(){
-  vInfo = vec3(p.z, p.w, 0.0);
+  float pu = floor(p.w / 1024.0);
+  vInfo = vec3(p.z, (pu + 0.5) / 1024.0, (p.w - pu * 1024.0 + 0.5) / 1024.0);
   gl_PointSize = uCellPx;
   gl_Position = vec4(p.x / uRes.x * 2.0 - 1.0, 1.0 - p.y / uRes.y * 2.0, 0.0, 1.0);
 }`;
   const ptFS = head + camGLSL + `
 varying vec3 vInfo;
 void main(){
-  vec2 dev = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
-  vec3 c = clamp(camAt(dev, vec2(vInfo.y, 7.0)) + grain(), 0.0, 1.0);
+  vec3 c = clamp(camAt(vInfo.yz, vInfo.yz * 1000.0 + 7.0) + grain(), 0.0, 1.0);
   gl_FragColor = vec4(c * vInfo.x, vInfo.x);
 }`;
   // 字：每個字一個會轉的方塊，貼字的圖
@@ -442,8 +444,9 @@ void main(){
       }
       gl.viewport(0, 0, w, h);
       // 鏡頭的對應：cover 鋪滿畫面；亂數範圍換成貼圖座標
-      const A = w / h, camScale = [A > V ? 1 : A / V, A > V ? V / A : 1];
-      const spread = [SCATTER * Math.max(1, 1 / V), SCATTER * Math.max(1, V)];   // 鏡頭畫面長邊的 7%（換成貼圖座標）
+      // 方塊是正方形：鏡頭畫面裁出中間的正方形鋪上去；亂數範圍是方塊邊長的 7%
+      const A = 1, camScale = [A > V ? 1 : A / V, A > V ? V / A : 1];
+      const spread = [SCATTER * camScale[0], SCATTER * camScale[1]];
       const tick = Math.floor(simMs / 1000 * RESAMPLE);
       const camU = U => {
         gl.uniform1i(U.uCam, 0);
@@ -475,7 +478,10 @@ void main(){
       // 3. 碎片
       if (debris.length) {
         if (ptData.length < debris.length * 4) ptData = new Float32Array(debris.length * 8);
-        debris.forEach((q, k) => { ptData[k * 4] = q.x * d; ptData[k * 4 + 1] = q.y * d; ptData[k * 4 + 2] = Math.max(0, q.life); ptData[k * 4 + 3] = q.seed; });
+        debris.forEach((q, k) => {
+          ptData[k * 4] = q.x * d; ptData[k * 4 + 1] = q.y * d; ptData[k * 4 + 2] = Math.max(0, q.life);
+          ptData[k * 4 + 3] = Math.floor(q.u * 1023) * 1024 + Math.floor(q.v * 1023);
+        });
         U = common(P.pt, w, h, d, seed);
         camU(U);
         gl.uniform1f(U.uCellPx, CELL * d);
