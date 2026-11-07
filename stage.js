@@ -103,6 +103,7 @@ const audio = {
   el: null, dur: 0,
   running: false,      // 時間是否在走（真的開始出聲之後才算）
   pos: 0, anchorT: 0, anchorP: 0, lastCT: -1, lastOut: 0, unlocking: false, unlocked: false,
+  armed: false, armCT: 0,  // 收到 playing／seeked 之後，等 currentTime 真的開始走才起算（不然時鐘會先跑到前面再被拉回來）
   get playing() { return !!this.el && !this.el.paused && !this.el.ended; },
   get duration() { return this.dur; },
   attach(url) {
@@ -110,13 +111,14 @@ const audio = {
     el.preload = 'auto'; el.playsInline = true; el.setAttribute('playsinline', '');
     const sync = () => {
       if (el.paused || el.seeking) return;
-      this.anchorT = this.lastCT = this.lastOut = el.currentTime;
-      this.anchorP = performance.now();
-      this.running = true;
+      this.pos = this.lastOut = el.currentTime;
+      this.armCT = el.currentTime;
+      this.armed = true;
+      this.running = false;
     };
     el.addEventListener('playing', sync);
     el.addEventListener('seeked', sync);
-    el.addEventListener('waiting', () => { if (this.running) this.pos = this.now(); this.running = false; });
+    el.addEventListener('waiting', () => { if (this.running) this.pos = this.now(); this.running = false; this.armed = false; });
     el.addEventListener('pause', () => { this.running = false; });
     el.addEventListener('ended', () => { this.running = false; this.pos = this.duration; });
     el.addEventListener('durationchange', () => { if (isFinite(el.duration) && el.duration > 0) this.dur = el.duration; });
@@ -132,17 +134,25 @@ const audio = {
   },
   // 耳朵目前聽到的位置（秒）
   now() {
-    if (!this.running) return this.pos;
     const pn = performance.now();
+    if (!this.running) {
+      // 剛開始播（或跳轉完）：currentTime 真的動了才開始走，之前停在原地
+      if (!this.armed || this.el.paused || this.el.seeking || this.el.currentTime === this.armCT) return this.pos;
+      this.armed = false;
+      this.anchorT = this.lastCT = this.lastOut = this.el.currentTime;
+      this.anchorP = pn;
+      this.running = true;
+    }
     let est = this.anchorT + (pn - this.anchorP) / 1000;
     const ct = this.el.currentTime;
     if (ct !== this.lastCT) {               // <audio> 回報了新的時間：慢慢校正，差太多就直接對齊
       this.lastCT = ct;
       const drift = ct - est;
-      if (Math.abs(drift) > 0.1) { this.anchorT = ct; this.anchorP = pn; est = ct; this.lastOut = ct; }
+      if (Math.abs(drift) > 0.1) { this.anchorT = ct; this.anchorP = pn; est = ct; }
       else { this.anchorT += drift * 0.1; est += drift * 0.1; }
     }
-    if (est < this.lastOut && this.lastOut - est < 0.1) est = this.lastOut;   // 不讓時間倒退
+    // 不讓時間倒退：真的往回跳一定是 seek()（會重新起算），這裡只是時鐘跑太前面，停一下等聲音追上
+    if (est < this.lastOut) est = this.lastOut;
     this.lastOut = est;
     return Math.min(this.duration || est, Math.max(0, est));
   },
@@ -173,6 +183,7 @@ const audio = {
     this.pos = t;
     if (Math.abs(this.el.currentTime - t) < 0.001) return;
     this.running = false;                   // 跳轉完成（seeked）後時間才繼續走
+    this.armed = false;
     this.el.currentTime = t;
   },
 };
