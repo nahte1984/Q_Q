@@ -12,6 +12,10 @@
    背景色 #313131（第一輪還沒掃到的地方）。
    鏡頭畫面套 lut/color.CUBE 的調色（和 rain 一樣，設定在 lut.js）。
 
+   64482 – 71971 ms  文字：畫面水平中央，由上到下平均分成十格，由上到下放「看故事謎底玩解讀遊戲」十個字的形狀當磁頭，
+              同時從最小開始各自在自己的位置長大，掃過的地方填上 #313131，直到整個畫面都是 #313131（小圖案也一起蓋掉）。
+              （字裡面的空隙會被掃過的範圍填滿，所以看到的是每個字往外長的輪廓）
+
    小圖案：每一輪掃描時，畫面上隨機的位置一秒冒出 6 個小圖案，顏色從五個顏色裡隨機挑，出現了就一直留著。
      第一輪冒出小圓點，第二輪冒出小星星，第三輪冒出小愛心（形狀和磁頭一樣）。
    大小照 _references/slitSymbol.png；落點可以到畫面邊緣（最多只看得到一半的形狀）。
@@ -39,6 +43,15 @@ const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;
 // 解析度上限（2 倍就很清楚；鏡頭畫面本身也沒有更細）
 const MAX_DPR = 2;
 
+// 文字：三輪結束之後，十個字的形狀同時從最小長大，用 #313131 蓋滿整個畫面
+const TEXT = {
+  chars: '看故事謎底玩解讀遊戲',
+  from: 64482, to: 71971,               // 開始、整個畫面填滿（毫秒）
+  stagger: 0,                            // 十個字開始長大的時間由上到下錯開多少（佔整段時間的比例；0 = 同時開始）
+  color: '#313131',
+  font: '"BIZ UDPMincho"',               // 字的形狀用哪個字型（要在 stage.js 的 FONT_TEXT 裡加上這些字）
+};
+
 // 小圖案
 const SHAPE_COLORS = ['#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3'];   // Figma Page 1 左邊那五個
 const SHAPE_SIZE = [19, 25, 24];         // 每一輪小圖案的寬度（px）：圓點直徑、星星、愛心（照 slitSymbol.png）
@@ -53,7 +66,7 @@ const clamp01 = x => Math.max(0, Math.min(1, x));
 export default {
   name: 'slit',
   needs: { camera: true },
-  dev: { from: 44210, to: 64481 },
+  dev: { from: 44210, to: 71971 },
 
   async preload(stage) {
     // 每一輪的形狀算成「角度 → 外框半徑」的表（最遠的一點 = 1）
@@ -61,7 +74,10 @@ export default {
       Promise.all(ROUNDS.map(async r => (r.shape === 'circle' ? { R: new Float32Array(BINS).fill(1), poly: null } : radialFromSVG(await stage.file(r.shape))))),
       CAMERA_LUT ? stage.file(CAMERA_LUT).then(parseCube).catch(err => { console.warn('調色檔沒有套用：', err); return null; }) : null,
     ]);
-    this.radial = radial.map(r => r.R);
+    // 十個字的形狀也算成同樣的表（接在三輪後面）
+    await stage.font(`400px ${TEXT.font}`, TEXT.chars);
+    this.textR = Array.from(TEXT.chars).map(ch => radialFromText(ch, TEXT.font));
+    this.radial = radial.map(r => r.R).concat(this.textR);
     this.polys = radial.map(r => r.poly);
     this.canvas = stage.canvas({ dpr: Math.min(MAX_DPR, window.devicePixelRatio || 1) });
     this.gl = slitLayer(this.canvas, this.radial);
@@ -77,11 +93,13 @@ export default {
   enter() {
     this.round = -1;      // 現在第幾輪
     this.last = 0;        // 上一幀磁頭的大小（CSS px）
+    this.textLast = Array.from(TEXT.chars).map(() => 0);   // 每個字上一幀的大小
+    this.textDone = false;
     if (this.gl) this.gl.clear();
     this.clearShapes();
   },
 
-  resize() { this.kmax = []; },
+  resize() { this.kmax = []; this.plan = null; },
 
   /* ---------- 小圖案 ---------- */
   clearShapes() {
@@ -99,9 +117,31 @@ export default {
     else { for (let k = 0; k < poly.length; k += 2) g.lineTo(poly[k] * w, poly[k + 1] * w); g.closePath(); }
     g.fill();
   },
+  // 文字長大時，把蓋到的小圖案擦掉（全部填滿就整張清掉）
+  eraseShapes(polys, all) {
+    const g = this.dctx;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (all) { g.clearRect(0, 0, this.dots.width, this.dots.height); return; }
+    const d = this.dots.width / this.stageW;
+    g.save();
+    g.globalCompositeOperation = 'destination-out';
+    g.beginPath();
+    for (const [c, cx, cy, k] of polys) {
+      const R = this.textR[c];
+      for (let b = 0; b < BINS; b += 2) {
+        const a = ((b + 0.5) / BINS - 0.5) * 2 * Math.PI, r = k * R[b] + 1;
+        const x = (cx + Math.cos(a) * r) * d, y = (cy + Math.sin(a) * r) * d;
+        b ? g.lineTo(x, y) : g.moveTo(x, y);
+      }
+      g.closePath();
+    }
+    g.fill('nonzero');
+    g.restore();
+  },
   // 跟著音樂時間冒出小圖案（一秒 SHAPES_PER_SEC 個）；拖回前面就清掉重來
   updateShapes(stage, ms) {
     const W = stage.width, H = stage.height;
+    this.stageW = W;
     if (ms < this.shapesMs - 100) this.clearShapes();
     this.shapesMs = ms;
     // 畫布大小變了（電腦上調整視窗）：照比例重畫
@@ -124,15 +164,31 @@ export default {
 
   // 磁頭要長到多大，整個形狀才會完全在畫面外
   kMax(stage, i) {
-    if (this.kmax[i]) return this.kmax[i];
-    const W = stage.width, H = stage.height, R = this.radial[i];
-    let m = 0;
-    const test = (x, y) => {
-      const dx = x - W / 2, dy = y - H / 2;
-      m = Math.max(m, Math.hypot(dx, dy) / radiusAt(R, Math.atan2(dy, dx)));
+    if (!this.kmax[i]) this.kmax[i] = reach(stage, this.radial[i], stage.width / 2, stage.height / 2);
+    return this.kmax[i];
+  },
+  // 文字的計畫：每個字的位置（畫面水平中央，由上到下十等份的中心）、開始的時間，
+  // 和一起長大的速度（算到十個字合起來剛好在 TEXT.to 把整個畫面蓋滿）
+  textPlan(stage) {
+    if (this.plan && this.plan.W === stage.width && this.plan.H === stage.height) return this.plan;
+    const W = stage.width, H = stage.height, n = this.textR.length, span = (TEXT.to - TEXT.from) / 1000;
+    const chars = this.textR.map((R, c) => ({
+      cx: W / 2, cy: (c + 0.5) * H / n,
+      start: (n > 1 ? c / (n - 1) : 0) * TEXT.stagger * span,          // 秒（從 TEXT.from 算起）
+      kmax: reach(stage, R, W / 2, (c + 0.5) * H / n),
+    }));
+    // 在畫面上取一些點，算每個字要長到多大才會蓋到它
+    const pts = [];
+    for (let j = 0; j <= 48; j++) for (let i = 0; i <= 24; i++) pts.push([i / 24 * W, j / 48 * H]);
+    const need = pts.map(([x, y]) => chars.map((ch, c) => Math.hypot(x - ch.cx, y - ch.cy) / radiusAt(this.textR[c], Math.atan2(y - ch.cy, x - ch.cx))));
+    const coverTime = v => {
+      let worst = 0;
+      for (const ks of need) { let t = Infinity; for (let c = 0; c < n; c++) t = Math.min(t, chars[c].start + ks[c] / v); worst = Math.max(worst, t); }
+      return worst;
     };
-    for (let j = 0; j <= 400; j++) { const a = j / 400; test(a * W, 0); test(a * W, H); test(0, a * H); test(W, a * H); }
-    return (this.kmax[i] = m + 2);
+    let lo = 1, hi = 1e7;                                                 // 速度（px/秒）
+    for (let it = 0; it < 60; it++) { const mid = Math.sqrt(lo * hi); if (coverTime(mid) > span) lo = mid; else hi = mid; }
+    return (this.plan = { W, H, chars, speed: hi });
   },
 
   update(stage, f) {
@@ -157,9 +213,72 @@ export default {
         this.last = cur;
       }
     }
+    // 文字：十個字同時從最小長大，掃過的地方填 #313131
+    if (ms >= TEXT.from && !this.textDone) {
+      const plan = this.textPlan(stage), sec = (ms - TEXT.from) / 1000, polys = [];
+      const all = ms >= TEXT.to;
+      if (all) this.gl.fill(TEXT.color);                                 // 時間到：確定整個畫面都蓋滿
+      else plan.chars.forEach((ch, c) => {
+        const k = Math.min(ch.kmax, Math.max(0, sec - ch.start) * plan.speed);
+        if (k < this.textLast[c]) this.textLast[c] = 0;
+        if (k > this.textLast[c]) {
+          this.gl.scan(null, stage, ROUNDS.length + c, this.textLast[c], k, ch.cx, ch.cy, TEXT.color);
+          this.textLast[c] = k;
+        }
+        if (k > 0) polys.push([c, ch.cx, ch.cy, k]);
+      });
+      this.eraseShapes(polys, all);
+      if (all) this.textDone = true;
+    } else if (ms < TEXT.from && this.textDone) {
+      this.textDone = false; this.textLast.fill(0);
+    }
     this.gl.show();
   },
 };
+
+// 中心在 (cx, cy) 的形狀要長到多大，才會整個在畫面外
+function reach(stage, R, cx, cy) {
+  const W = stage.width, H = stage.height;
+  let m = 0;
+  const test = (x, y) => { const dx = x - cx, dy = y - cy; m = Math.max(m, Math.hypot(dx, dy) / radiusAt(R, Math.atan2(dy, dx))); };
+  for (let j = 0; j <= 400; j++) { const a = j / 400; test(a * W, 0); test(a * W, H); test(0, a * H); test(W, a * H); }
+  return m + 2;
+}
+
+// 一個字 → 每個角度上，從字的中心往外最遠碰到筆畫的距離（最遠的一點 = 1）
+function radialFromText(ch, font) {
+  const S = 512, c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.font = `${S * 0.78}px ${font}`;
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText(ch, S / 2, S / 2);
+  const px = g.getImageData(0, 0, S, S).data;
+  let x0 = S, x1 = 0, y0 = S, y1 = 0;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (px[(y * S + x) * 4 + 3] > 127) {
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  const R = new Float32Array(BINS);
+  if (x1 < x0) return R.fill(1);                   // 字型沒載到：當成圓形
+  const cx = (x0 + x1 + 1) / 2, cy = (y0 + y1 + 1) / 2;
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if (px[(y * S + x) * 4 + 3] <= 127) continue;
+    // 每個像素的四個角都算進去，細的筆畫也不會漏掉
+    for (const [ox, oy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const dx = x + ox - cx, dy = y + oy - cy;
+      const b = Math.floor((Math.atan2(dy, dx) / (2 * Math.PI) + 0.5) * BINS) % BINS;
+      const r = Math.hypot(dx, dy);
+      if (r > R[b]) R[b] = r;
+    }
+  }
+  // 沒有點落到的角度：用左右兩邊補
+  const out = new Float32Array(BINS);
+  for (let b = 0; b < BINS; b++) out[b] = Math.max(R[b], Math.min(R[(b + 1) % BINS], R[(b + BINS - 1) % BINS]));
+  let max = 0;
+  for (let b = 0; b < BINS; b++) max = Math.max(max, out[b]);
+  for (let b = 0; b < BINS; b++) out[b] = Math.max(out[b] / max, 0.01);
+  return out;
+}
 
 function radiusAt(R, a) {
   const u = (a / (2 * Math.PI) + 0.5) * BINS - 0.5;
@@ -227,7 +346,9 @@ precision mediump float;
   const scanFS = head + `
 uniform sampler2D uCam, uShape;
 uniform vec2 uRes, uCamScale;
-uniform float uD, uRow, uRows, uLast, uCur, uUseLut;
+uniform float uD, uRow, uRows, uLast, uCur, uUseLut, uSolid;
+uniform vec2 uCenter;                    // 磁頭的中心（裝置像素）
+uniform vec3 uColor;                     // uSolid = 1 時填這個顏色（文字），不然填鏡頭畫面
 ${LUT_GLSL}
 const float BINS = ${BINS}.0;
 float decode(float i){
@@ -240,9 +361,10 @@ float radiusAt(float a){
   return mix(decode(i), decode(i + 1.0), u - i);
 }
 void main(){
-  vec2 p = (gl_FragCoord.xy - uRes * 0.5) / uD;  p.y = -p.y;      // 以畫面中心為原點（CSS px，往下為正）
+  vec2 p = (gl_FragCoord.xy - uCenter) / uD;  p.y = -p.y;         // 以磁頭中心為原點（CSS px，往下為正）
   float s = length(p) / radiusAt(atan(p.y, p.x));                 // 磁頭要長到多大才會經過這裡
   if (s < uLast || s >= uCur) discard;
+  if (uSolid > 0.5) { gl_FragColor = vec4(uColor, 1.0); return; }
   vec2 t = (vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uRes - 0.5) * uCamScale + 0.5;   // 像 cover 一樣鋪滿
   t.x = 1.0 - t.x;                                                 // 前鏡頭左右鏡像
   vec3 c = texture2D(uCam, t).rgb;
@@ -352,36 +474,46 @@ void main(){
       lutTex = uploadLut(gl, scan.p, L, 4, lutTex);
       gl.uniform1f(scan.U.uUseLut, 1);
     },
-    clear() {
+    clear() { this.fill(BG_COLOR); },
+    // 整張填一個顏色
+    fill(color) {
       if (gl.isContextLost()) return;
       ensure();
+      const C = hex(color);
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.clearColor(BG[0], BG[1], BG[2], 1);
+      gl.clearColor(C[0], C[1], C[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     },
-    // 磁頭從 last 長到 cur（CSS px）：這一圈寫進鏡頭畫面
-    scan(video, stage, round, last, cur) {
+    // 磁頭從 last 長到 cur（CSS px）：這一圈寫進鏡頭畫面。
+    // 中心 (cx, cy) 不寫就是畫面中心；color 有寫就填這個顏色（不用鏡頭）
+    scan(video, stage, round, last, cur, cx, cy, color) {
       if (gl.isContextLost()) return;
       ensure();
-      watch(video);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, camTex);
-      const vw = video.videoWidth, vh = video.videoHeight;
-      if (fresh || !video.requestVideoFrameCallback) {
-        if (vw !== texW || vh !== texH) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video); texW = vw; texH = vh; }
-        else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGB, gl.UNSIGNED_BYTE, video);
-        fresh = false;
+      let V = 1;
+      if (video) {
+        watch(video);
+        const vw = video.videoWidth, vh = video.videoHeight;
+        if (fresh || !video.requestVideoFrameCallback) {
+          if (vw !== texW || vh !== texH) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video); texW = vw; texH = vh; }
+          else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGB, gl.UNSIGNED_BYTE, video);
+          fresh = false;
+        }
+        V = vw / vh;
       }
-      const w = hw, h = hh, d = w / stage.width;
-      const A = w / h, V = vw / vh;
+      const w = hw, h = hh, d = w / stage.width, A = w / h;
+      const px = (cx ?? stage.width / 2) * d, py = h - (cy ?? stage.height / 2) * d;   // 中心（裝置像素，往上為正）
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.viewport(0, 0, w, h);
       // 只算磁頭外框以內的方塊（形狀最遠的一點 = cur）
       const half = Math.ceil(cur * d) + 2;
-      const x0 = Math.max(0, Math.floor(w / 2 - half)), y0 = Math.max(0, Math.floor(h / 2 - half));
+      const x0 = Math.max(0, Math.floor(px - half)), y0 = Math.max(0, Math.floor(py - half));
+      const x1 = Math.min(w, Math.ceil(px + half)), y1 = Math.min(h, Math.ceil(py + half));
+      if (x1 <= x0 || y1 <= y0) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); return; }
       gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(x0, y0, Math.min(w, Math.ceil(w / 2 + half)) - x0, Math.min(h, Math.ceil(h / 2 + half)) - y0);
+      gl.scissor(x0, y0, x1 - x0, y1 - y0);
       gl.useProgram(scan.p);
       const U = scan.U;
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, shapeTex);
@@ -391,6 +523,9 @@ void main(){
       gl.uniform1f(U.uD, d);
       gl.uniform1f(U.uRow, round); gl.uniform1f(U.uRows, rows);
       gl.uniform1f(U.uLast, last); gl.uniform1f(U.uCur, cur);
+      gl.uniform2f(U.uCenter, px, py);
+      gl.uniform1f(U.uSolid, color ? 1 : 0);
+      if (color) gl.uniform3fv(U.uColor, hex(color));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.SCISSOR_TEST);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
