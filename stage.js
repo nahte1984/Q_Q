@@ -295,7 +295,7 @@ function setMediaSession() {
   try {
     if (!('mediaSession' in navigator) || !window.MediaMetadata) return;
     navigator.mediaSession.metadata = new MediaMetadata({
-      title: '每個人都是一種文體', artist: '梅林玫羚', album: 'Interactive Music Video',
+      title: '每個人都是一種文體', artist: '梅林玫羚', album: '每個人都是一種文體',
       artwork: [{ src: new URL('./images/cover.webp', import.meta.url).href, sizes: '800x800', type: 'image/webp' }],
     });
   } catch (e) {}
