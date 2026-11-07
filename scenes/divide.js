@@ -216,6 +216,7 @@ precision mediump float;
 #endif
 uniform sampler2D uCam, uAtlas;
 uniform float uHasCam, uUnit, uTime, uRadius, uGrain, uGrainPx, uFx, uAlpha;
+uniform vec3 uBgCol;
 uniform vec2 uCard, uGridG, uCamScale, uSeed, uSrc;
 uniform vec3 uLine;
 varying vec2 vLocal;
@@ -357,6 +358,12 @@ vec3 fxThreshold(vec2 q){
 
 
 void main(){
+  float grain = (grainHash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain;
+  if (uFx < -0.5) {                                        // 背景（格子外面）：和格子一樣加顆粒
+    vec3 b = clamp(uBgCol + grain, 0.0, 1.0);
+    gl_FragColor = vec4(b * uAlpha, uAlpha);
+    return;
+  }
   vec2 r = abs(vLocal - uCard * 0.5) - (uCard * 0.5 - uRadius);
   float inside = clamp(0.5 - (length(max(r, 0.0)) + min(max(r.x, r.y), 0.0) - uRadius), 0.0, 1.0);   // 圓角
   if (inside <= 0.0) discard;
@@ -371,7 +378,7 @@ void main(){
   else if (uFx < 6.5) c = fxDots(q);
   else if (uFx < 7.5) c = fxVoronoi(q);
   else c = fxThreshold(q);
-  c = clamp(c + (grainHash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain, 0.0, 1.0);
+  c = clamp(c + grain, 0.0, 1.0);
   float a = inside * uAlpha;
   gl_FragColor = vec4(c * a, a);
 }`;
@@ -414,12 +421,13 @@ void main(){
 
   const u = n => gl.getUniformLocation(prog, n);
   const U = {};
-  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uRadius', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uRot', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
+  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uRadius', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uRot', 'uBgCol', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
   gl.uniform1i(u('uCam'), 0);
   gl.uniform1i(u('uAtlas'), 1);
   gl.uniform3fv(u('uLine'), hex(P.contour.lineColor));
   gl.uniform1f(u('uGrain'), GRAIN_AMOUNT);
   const BG = hex(BG_COLOR);
+  gl.uniform3fv(u('uBgCol'), BG);
 
   let texW = 0, texH = 0, fresh = true, watching = null;
   const watch = v => {
@@ -450,7 +458,7 @@ void main(){
       const unit = L.gh / 720 * EFFECT_SCALE;                      // 每個 grainrad 像素是幾個 CSS px
       const A = L.gw / L.gh;
       gl.viewport(0, 0, Wd, Hd);
-      gl.clearColor(BG[0] * bgA, BG[1] * bgA, BG[2] * bgA, bgA);
+      gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.uniform1f(U.uHasCam, video ? 1 : 0);
       gl.uniform1f(U.uUnit, unit * d);
@@ -462,6 +470,14 @@ void main(){
       gl.uniform2f(U.uCamScale, A > V ? 1 : A / V, A > V ? V / A : 1);
       gl.uniform2f(U.uSeed, Math.random() * 1000, Math.random() * 1000);
       gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
+      // 背景：整個畫面鋪一層 #313131（加顆粒），進場時透明度從 0 到 1
+      if (bgA > 0) {
+        gl.uniform4f(U.uRect, -1, -1, Wd + 2, Hd + 2);
+        gl.uniform2f(U.uRot, 1, 0);
+        gl.uniform1f(U.uFx, -1);
+        gl.uniform1f(U.uAlpha, bgA);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
       for (const c of cards) {
         gl.uniform4f(U.uRect, c.x * d - 1, c.y * d - 1, L.cw * d + 2, L.ch * d + 2);
         gl.uniform2f(U.uRot, Math.cos(c.rot || 0), Math.sin(c.rot || 0));

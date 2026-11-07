@@ -12,9 +12,9 @@
    背景色 #313131（第一輪還沒掃到的地方）。
    鏡頭畫面套 lut/color.CUBE 的調色（和 rain 一樣，設定在 lut.js）。
 
-   64482 – 71971 ms  文字：畫面水平中央，由上到下平均分成十格，由上到下放「看故事謎底玩解讀遊戲」十個字的形狀當磁頭，
-              同時從最小開始各自在自己的位置長大，掃過的地方填上 #313131，直到整個畫面都是 #313131（小圖案也一起蓋掉）。
-              （字裡面的空隙會被掃過的範圍填滿，所以看到的是每個字往外長的輪廓）
+   64482 – 71971 ms  五角星（images/slit-5star.svg）像遮罩一樣從畫面中心由最小長到最大，
+              星星裡面慢慢露出背景（#313131），最後整個畫面都是背景；
+   68105 ms   背景上直排的「看故事謎底玩解讀遊戲」淡入（Figma Page 1）。
 
    小圖案：每一輪掃描時，畫面上隨機的位置一秒冒出 6 個小圖案，顏色從五個顏色裡隨機挑，出現了就一直留著。
      第一輪冒出小圓點，第二輪冒出小星星，第三輪冒出小愛心（形狀和磁頭一樣）。
@@ -43,13 +43,16 @@ const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;
 // 解析度上限（2 倍就很清楚；鏡頭畫面本身也沒有更細）
 const MAX_DPR = 2;
 
-// 文字：三輪結束之後，十個字的形狀同時從最小長大，用 #313131 蓋滿整個畫面
-const TEXT = {
-  chars: '看故事謎底玩解讀遊戲',
-  from: 64482, to: 71971,               // 開始、整個畫面填滿（毫秒）
-  stagger: 0,                            // 十個字開始長大的時間由上到下錯開多少（佔整段時間的比例；0 = 同時開始）
-  color: '#313131',
-  font: '"BIZ UDPMincho"',               // 字的形狀用哪個字型（要在 stage.js 的 FONT_TEXT 裡加上這些字）
+// 最後：五角星形的遮罩從畫面中心由小到大，裡面露出背景
+const REVEAL = {
+  shape: '../images/slit-5star.svg',
+  from: 64482, to: 71971,               // 從最小長到整個畫面都在星星裡（毫秒）
+  bg: '#313131',
+  // 背景上的字（Figma：BIZ UDPMincho 22px、行高 27px、#F8EFCE，直排置中）；空字串 = 空一行
+  lines: ['看', '故', '事', '謎', '底', '', '玩', '解', '讀', '遊', '戲'],
+  font: '22px/27px "BIZ UDPMincho"', color: '#f8efce',
+  textAt: 68105,                         // 字從這裡開始淡入（毫秒；在這之前背景是完整的 #313131）
+  textFade: 1000,                        // 淡入花多久（毫秒）
 };
 
 // 小圖案
@@ -74,10 +77,7 @@ export default {
       Promise.all(ROUNDS.map(async r => (r.shape === 'circle' ? { R: new Float32Array(BINS).fill(1), poly: null } : radialFromSVG(await stage.file(r.shape))))),
       CAMERA_LUT ? stage.file(CAMERA_LUT).then(parseCube).catch(err => { console.warn('調色檔沒有套用：', err); return null; }) : null,
     ]);
-    // 十個字的形狀也算成同樣的表（接在三輪後面）
-    await stage.font(`400px ${TEXT.font}`, TEXT.chars);
-    this.textR = Array.from(TEXT.chars).map(ch => radialFromText(ch, TEXT.font));
-    this.radial = radial.map(r => r.R).concat(this.textR);
+    this.radial = radial.map(r => r.R);
     this.polys = radial.map(r => r.poly);
     this.canvas = stage.canvas({ dpr: Math.min(MAX_DPR, window.devicePixelRatio || 1) });
     this.gl = slitLayer(this.canvas, this.radial);
@@ -88,18 +88,29 @@ export default {
     this.dctx = this.dots.getContext('2d');
     this.kmax = [];
     this.shapes = [];
+    // 最後的背景：一層蓋在最上面的畫面，用五角星的外框當遮罩
+    const [star] = await Promise.all([stage.file(REVEAL.shape).then(radialFromSVG), stage.font('22px "BIZ UDPMincho"', REVEAL.lines.join(''))]);
+    let rmax = 0;
+    for (let k = 0; k < star.poly.length; k += 2) rmax = Math.max(rmax, Math.hypot(star.poly[k], star.poly[k + 1]));
+    this.star = { R: star.R, poly: star.poly, rmax };
+    // 這一層也用 WebGL 畫（和下面的鏡頭一樣加顆粒），蓋在小圖案上面
+    this.revealCanvas = stage.canvas({ dpr: Math.min(MAX_DPR, window.devicePixelRatio || 1) });
+    this.revealCanvas.style.pointerEvents = 'none';
+    this.revealGL = revealLayer(this.revealCanvas, this.star.R);
+    this.revealOn = true; this.showReveal(false);
+    this.revealK = -1;
   },
 
   enter() {
     this.round = -1;      // 現在第幾輪
     this.last = 0;        // 上一幀磁頭的大小（CSS px）
-    this.textLast = Array.from(TEXT.chars).map(() => 0);   // 每個字上一幀的大小
-    this.textDone = false;
+    this.revealK = -1;
+    this.lastMs = undefined;
     if (this.gl) this.gl.clear();
     this.clearShapes();
   },
 
-  resize() { this.kmax = []; this.plan = null; },
+  resize() { this.kmax = []; this.revealMax = 0; },
 
   /* ---------- 小圖案 ---------- */
   clearShapes() {
@@ -117,32 +128,10 @@ export default {
     else { for (let k = 0; k < poly.length; k += 2) g.lineTo(poly[k] * w, poly[k + 1] * w); g.closePath(); }
     g.fill();
   },
-  // 文字長大時，把蓋到的小圖案擦掉（全部填滿就整張清掉）
-  eraseShapes(polys, all) {
-    const g = this.dctx;
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    if (all) { g.clearRect(0, 0, this.dots.width, this.dots.height); return; }
-    const d = this.dots.width / this.stageW;
-    g.save();
-    g.globalCompositeOperation = 'destination-out';
-    g.beginPath();
-    for (const [c, cx, cy, k] of polys) {
-      const R = this.textR[c];
-      for (let b = 0; b < BINS; b += 2) {
-        const a = ((b + 0.5) / BINS - 0.5) * 2 * Math.PI, r = k * R[b] + 1;
-        const x = (cx + Math.cos(a) * r) * d, y = (cy + Math.sin(a) * r) * d;
-        b ? g.lineTo(x, y) : g.moveTo(x, y);
-      }
-      g.closePath();
-    }
-    g.fill('nonzero');
-    g.restore();
-  },
   // 跟著音樂時間冒出小圖案（一秒 SHAPES_PER_SEC 個）；拖回前面就清掉重來
   updateShapes(stage, ms) {
     const W = stage.width, H = stage.height;
-    this.stageW = W;
-    if (ms < this.shapesMs - 100) this.clearShapes();
+    if (ms < this.shapesMs - 500) this.clearShapes();              // 拖回前面（開發時）才重來
     this.shapesMs = ms;
     // 畫布大小變了（電腦上調整視窗）：照比例重畫
     if (this.dots.width !== this.dotsW || this.dots.height !== this.dotsH) {
@@ -167,34 +156,31 @@ export default {
     if (!this.kmax[i]) this.kmax[i] = reach(stage, this.radial[i], stage.width / 2, stage.height / 2);
     return this.kmax[i];
   },
-  // 文字的計畫：每個字的位置（畫面水平中央，由上到下十等份的中心）、開始的時間，
-  // 和一起長大的速度（算到十個字合起來剛好在 TEXT.to 把整個畫面蓋滿）
-  textPlan(stage) {
-    if (this.plan && this.plan.W === stage.width && this.plan.H === stage.height) return this.plan;
-    const W = stage.width, H = stage.height, n = this.textR.length, span = (TEXT.to - TEXT.from) / 1000;
-    const chars = this.textR.map((R, c) => ({
-      cx: W / 2, cy: (c + 0.5) * H / n,
-      start: (n > 1 ? c / (n - 1) : 0) * TEXT.stagger * span,          // 秒（從 TEXT.from 算起）
-      kmax: reach(stage, R, W / 2, (c + 0.5) * H / n),
-    }));
-    // 在畫面上取一些點，算每個字要長到多大才會蓋到它
-    const pts = [];
-    for (let j = 0; j <= 48; j++) for (let i = 0; i <= 24; i++) pts.push([i / 24 * W, j / 48 * H]);
-    const need = pts.map(([x, y]) => chars.map((ch, c) => Math.hypot(x - ch.cx, y - ch.cy) / radiusAt(this.textR[c], Math.atan2(y - ch.cy, x - ch.cx))));
-    const coverTime = v => {
-      let worst = 0;
-      for (const ks of need) { let t = Infinity; for (let c = 0; c < n; c++) t = Math.min(t, chars[c].start + ks[c] / v); worst = Math.max(worst, t); }
-      return worst;
-    };
-    let lo = 1, hi = 1e7;                                                 // 速度（px/秒）
-    for (let it = 0; it < 60; it++) { const mid = Math.sqrt(lo * hi); if (coverTime(mid) > span) lo = mid; else hi = mid; }
-    return (this.plan = { W, H, chars, speed: hi });
+  // 五角星遮罩：從畫面中心由最小長到整個畫面都在星星裡
+  showReveal(on) {
+    if (this.revealOn === on) return;
+    this.revealOn = on;
+    this.revealCanvas.style.visibility = on ? 'visible' : 'hidden';
   },
+  updateReveal(stage, ms) {
+    if (!this.revealGL) return;
+    const W = stage.width, H = stage.height;
+    if (!this.revealMax) this.revealMax = reach(stage, this.star.R, W / 2, H / 2);
+    const k = ms < REVEAL.from ? 0 : clamp01((ms - REVEAL.from) / (REVEAL.to - REVEAL.from)) * this.revealMax;
+    this.showReveal(k > 0);
+    if (k <= 0) return;
+    // 字的大小跟著畫面縮放（和載入畫面一樣）；字照音樂時間淡入
+    const scale = Math.max(0.82, Math.min(1.45, Math.min(W / 388, H / 743)));
+    const a = clamp01((ms - REVEAL.textAt) / REVEAL.textFade);
+    this.revealGL.draw(stage, k >= this.revealMax ? 1e6 : k, scale, a);
+  },
+
 
   update(stage, f) {
     if (!this.gl) return;
     const ms = f ? f.t * 1000 : 0;
     this.updateShapes(stage, ms);
+    const jumpedBack = ms < (this.lastMs ?? ms) - 500;
     let i = -1;
     for (let j = 0; j < ROUNDS.length; j++) if (ms >= ROUNDS[j].from) i = j;
     const v = stage.camera, video = v && v.videoWidth > 0 ? v : null;
@@ -207,31 +193,15 @@ export default {
         if (video && p >= 0 && p < i && this.last < pm) this.gl.scan(video, stage, p, this.last, pm);
         this.round = i; this.last = 0;                            // 新的一輪從中心開始
       }
-      if (cur < this.last) this.last = 0;                         // 往回跳（開發時拖時間）
+      if (jumpedBack) this.last = 0;                              // 往回跳（開發時拖時間）才從中心重來；時間只是晃一下就等它追上
       if (video && cur > this.last) {
         this.gl.scan(video, stage, i, this.last, cur);             // 只畫這一幀掃過的那一圈
         this.last = cur;
       }
     }
-    // 文字：十個字同時從最小長大，掃過的地方填 #313131
-    if (ms >= TEXT.from && !this.textDone) {
-      const plan = this.textPlan(stage), sec = (ms - TEXT.from) / 1000, polys = [];
-      const all = ms >= TEXT.to;
-      if (all) this.gl.fill(TEXT.color);                                 // 時間到：確定整個畫面都蓋滿
-      else plan.chars.forEach((ch, c) => {
-        const k = Math.min(ch.kmax, Math.max(0, sec - ch.start) * plan.speed);
-        if (k < this.textLast[c]) this.textLast[c] = 0;
-        if (k > this.textLast[c]) {
-          this.gl.scan(null, stage, ROUNDS.length + c, this.textLast[c], k, ch.cx, ch.cy, TEXT.color);
-          this.textLast[c] = k;
-        }
-        if (k > 0) polys.push([c, ch.cx, ch.cy, k]);
-      });
-      this.eraseShapes(polys, all);
-      if (all) this.textDone = true;
-    } else if (ms < TEXT.from && this.textDone) {
-      this.textDone = false; this.textLast.fill(0);
-    }
+    // 最後：五角星遮罩由小到大，露出背景
+    this.updateReveal(stage, ms);
+    this.lastMs = ms;
     this.gl.show();
   },
 };
@@ -243,41 +213,6 @@ function reach(stage, R, cx, cy) {
   const test = (x, y) => { const dx = x - cx, dy = y - cy; m = Math.max(m, Math.hypot(dx, dy) / radiusAt(R, Math.atan2(dy, dx))); };
   for (let j = 0; j <= 400; j++) { const a = j / 400; test(a * W, 0); test(a * W, H); test(0, a * H); test(W, a * H); }
   return m + 2;
-}
-
-// 一個字 → 每個角度上，從字的中心往外最遠碰到筆畫的距離（最遠的一點 = 1）
-function radialFromText(ch, font) {
-  const S = 512, c = document.createElement('canvas');
-  c.width = c.height = S;
-  const g = c.getContext('2d', { willReadFrequently: true });
-  g.font = `${S * 0.78}px ${font}`;
-  g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(ch, S / 2, S / 2);
-  const px = g.getImageData(0, 0, S, S).data;
-  let x0 = S, x1 = 0, y0 = S, y1 = 0;
-  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) if (px[(y * S + x) * 4 + 3] > 127) {
-    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-  }
-  const R = new Float32Array(BINS);
-  if (x1 < x0) return R.fill(1);                   // 字型沒載到：當成圓形
-  const cx = (x0 + x1 + 1) / 2, cy = (y0 + y1 + 1) / 2;
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    if (px[(y * S + x) * 4 + 3] <= 127) continue;
-    // 每個像素的四個角都算進去，細的筆畫也不會漏掉
-    for (const [ox, oy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      const dx = x + ox - cx, dy = y + oy - cy;
-      const b = Math.floor((Math.atan2(dy, dx) / (2 * Math.PI) + 0.5) * BINS) % BINS;
-      const r = Math.hypot(dx, dy);
-      if (r > R[b]) R[b] = r;
-    }
-  }
-  // 沒有點落到的角度：用左右兩邊補
-  const out = new Float32Array(BINS);
-  for (let b = 0; b < BINS; b++) out[b] = Math.max(R[b], Math.min(R[(b + 1) % BINS], R[(b + BINS - 1) % BINS]));
-  let max = 0;
-  for (let b = 0; b < BINS; b++) max = Math.max(max, out[b]);
-  for (let b = 0; b < BINS; b++) out[b] = Math.max(out[b] / max, 0.01);
-  return out;
 }
 
 function radiusAt(R, a) {
@@ -330,6 +265,121 @@ function radialFromSVG(buf) {
   return { R, poly };
 }
 
+/* ---------- 最後的背景：五角星遮罩裡露出 #313131 和直排的字，加顆粒 ---------- */
+function revealLayer(canvas, R) {
+  const gl = canvas.getContext('webgl', { antialias: false, alpha: true, premultipliedAlpha: true, depth: false, stencil: false });
+  if (!gl) return null;
+  const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
+  const fs = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
+precision mediump float;
+#endif
+uniform sampler2D uShape, uText;
+uniform vec2 uRes, uSeed;
+uniform float uD, uK, uTextA, uGrain, uGrainPx;
+uniform vec3 uBg, uFg;
+const float BINS = ${BINS}.0;
+float decode(float i){
+  vec4 t = texture2D(uShape, vec2((mod(i, BINS) + 0.5) / BINS, 0.5));
+  return (t.r * 65280.0 + t.g * 255.0) / 65535.0;
+}
+float radiusAt(float a){
+  float u = (a / 6.2831853 + 0.5) * BINS - 0.5;
+  float i = floor(u);
+  return mix(decode(i), decode(i + 1.0), u - i);
+}
+float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+void main(){
+  vec2 p = (gl_FragCoord.xy - uRes * 0.5) / uD;  p.y = -p.y;      // 以畫面中心為原點（CSS px，往下為正）
+  float m = clamp((uK * radiusAt(atan(p.y, p.x)) - length(p)) * uD + 0.5, 0.0, 1.0);   // 星星裡面 = 1（邊緣柔化一個像素）
+  if (m <= 0.0) discard;
+  float t = texture2D(uText, vec2(gl_FragCoord.x / uRes.x, 1.0 - gl_FragCoord.y / uRes.y)).a * uTextA;
+  vec3 c = mix(uBg, uFg, t);
+  c = clamp(c + (hash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain, 0.0, 1.0);   // 顆粒
+  gl_FragColor = vec4(c * m, m);
+}`;
+  const sh = (type, src) => {
+    const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
+    if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o));
+    return o;
+  };
+  const prog = gl.createProgram();
+  try {
+    gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+    gl.bindAttribLocation(prog, 0, 'p');
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch (err) { console.warn('slit 背景 shader 失敗', err); return null; }
+  gl.useProgram(prog);
+  const u = n => gl.getUniformLocation(prog, n);
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  const tex = (unit, filter) => {
+    const t = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    return t;
+  };
+  // 星星的形狀表（16 位元，和磁頭一樣）
+  tex(0, gl.NEAREST);
+  const data = new Uint8Array(BINS * 4);
+  for (let b = 0; b < BINS; b++) { const v = Math.round(clamp01(R[b]) * 65535); data[b * 4] = v >> 8; data[b * 4 + 1] = v & 255; data[b * 4 + 3] = 255; }
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, BINS, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  // 字：畫在一張和畫布一樣大的透明圖上（大小變了才重畫）
+  tex(1, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+  gl.uniform1i(u('uShape'), 0); gl.uniform1i(u('uText'), 1);
+  gl.uniform3fv(u('uBg'), hex(REVEAL.bg)); gl.uniform3fv(u('uFg'), hex(REVEAL.color));
+  gl.uniform1f(u('uGrain'), GRAIN_AMOUNT);
+  const U = {}; for (const n of ['uRes', 'uSeed', 'uD', 'uK', 'uTextA', 'uGrainPx']) U[n] = u(n);
+  let textKey = '';
+  const drawText = (w, h, d, scale) => {
+    const key = `${w}x${h}@${scale.toFixed(4)}`;
+    if (key === textKey) return;
+    textKey = key;
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const g = c.getContext('2d');
+    const m = /(\d+(?:\.\d+)?)px\/(\d+(?:\.\d+)?)px\s+(.*)/.exec(REVEAL.font) || [0, 22, 27, '"BIZ UDPMincho"'];
+    const size = +m[1] * scale * d, lh = +m[2] * scale * d;
+    g.font = `${size}px ${m[3]}`;
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    const n = REVEAL.lines.length;
+    REVEAL.lines.forEach((line, i) => { if (line) g.fillText(line, w / 2, h / 2 + (i - (n - 1) / 2) * lh); });
+    gl.activeTexture(gl.TEXTURE1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+  };
+  return {
+    // k：星星的大小（CSS px，最遠的尖端到中心）；scale：字的縮放；textA：字的透明度
+    draw(stage, k, scale, textA) {
+      if (gl.isContextLost()) return;
+      const w = canvas.width, h = canvas.height, d = w / stage.width;
+      drawText(w, h, d, scale);
+      gl.viewport(0, 0, w, h);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.uniform2f(U.uRes, w, h);
+      gl.uniform2f(U.uSeed, Math.random() * 1000, Math.random() * 1000);
+      gl.uniform1f(U.uD, d);
+      gl.uniform1f(U.uK, k);
+      gl.uniform1f(U.uTextA, textA);
+      gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    },
+  };
+}
+
 /* ---------- WebGL ---------- */
 function slitLayer(canvas, radial) {
   const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: false, stencil: false, preserveDrawingBuffer: false });
@@ -346,9 +396,8 @@ precision mediump float;
   const scanFS = head + `
 uniform sampler2D uCam, uShape;
 uniform vec2 uRes, uCamScale;
-uniform float uD, uRow, uRows, uLast, uCur, uUseLut, uSolid;
+uniform float uD, uRow, uRows, uLast, uCur, uUseLut;
 uniform vec2 uCenter;                    // 磁頭的中心（裝置像素）
-uniform vec3 uColor;                     // uSolid = 1 時填這個顏色（文字），不然填鏡頭畫面
 ${LUT_GLSL}
 const float BINS = ${BINS}.0;
 float decode(float i){
@@ -364,7 +413,6 @@ void main(){
   vec2 p = (gl_FragCoord.xy - uCenter) / uD;  p.y = -p.y;         // 以磁頭中心為原點（CSS px，往下為正）
   float s = length(p) / radiusAt(atan(p.y, p.x));                 // 磁頭要長到多大才會經過這裡
   if (s < uLast || s >= uCur) discard;
-  if (uSolid > 0.5) { gl_FragColor = vec4(uColor, 1.0); return; }
   vec2 t = (vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uRes - 0.5) * uCamScale + 0.5;   // 像 cover 一樣鋪滿
   t.x = 1.0 - t.x;                                                 // 前鏡頭左右鏡像
   vec3 c = texture2D(uCam, t).rgb;
@@ -486,8 +534,8 @@ void main(){
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     },
     // 磁頭從 last 長到 cur（CSS px）：這一圈寫進鏡頭畫面。
-    // 中心 (cx, cy) 不寫就是畫面中心；color 有寫就填這個顏色（不用鏡頭）
-    scan(video, stage, round, last, cur, cx, cy, color) {
+    // 中心 (cx, cy) 不寫就是畫面中心
+    scan(video, stage, round, last, cur, cx, cy) {
       if (gl.isContextLost()) return;
       ensure();
       gl.activeTexture(gl.TEXTURE0);
@@ -524,8 +572,6 @@ void main(){
       gl.uniform1f(U.uRow, round); gl.uniform1f(U.uRows, rows);
       gl.uniform1f(U.uLast, last); gl.uniform1f(U.uCur, cur);
       gl.uniform2f(U.uCenter, px, py);
-      gl.uniform1f(U.uSolid, color ? 1 : 0);
-      if (color) gl.uniform3fv(U.uColor, hex(color));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.SCISSOR_TEST);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
