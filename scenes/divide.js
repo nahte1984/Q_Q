@@ -3,6 +3,7 @@
    --------------------------------------------------------------------------
    29800 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
               點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）。
+   42040 ms   九格隨機錯落地往下掉，最慢的那一格在 44210 ms 完全掉出畫面（接著 slit 開始）。
               前鏡頭畫面鋪滿整個九宮格（像 object-fit: cover），每一格只露出自己那一塊，
               再各自套一種 grainrad 的效果；九格拼起來就是原本完整的鏡頭畫面（格子之間的縫會蓋掉一點）。
    版面：      格子和格子、格子和瀏覽器邊界都距離 5px，九宮格放到最大，直到碰到畫面的寬或高；
@@ -24,14 +25,19 @@ const BG_COLOR = '#313131';              // 格子外面
 
 /* ---------- 進場：九格用隨機的順序一格一格淡入，背景色同時蓋過上一段 ----------
    index.html 裡 divide 那一行的 dur 要和 INTRO 一樣 */
-const INTRO = 2000;                      // 整個進場（毫秒）
+const INTRO = 1300;                      // 整個進場（毫秒）
 const CARD_FADE = 500;                   // 每一格淡入花多久（毫秒）；九格的開始時間平均分散在剩下的時間裡
 
 /* ---------- 點畫面：九個格子隨機換位子 ---------- */
-const TAP_FADE = 600;                    // 每一格重新淡入花多久（毫秒）
+const TAP_FADE = 200;                    // 每一格重新淡入花多久（毫秒）
 const TAP_SPREAD = 200;                  // 九格的淡入開始時間在這段時間裡隨機錯開（毫秒；0 = 九格一起淡入）
-const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
+const SHUFFLE_CARRIES_IMAGE = true;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
                                          // false：只有效果換位子，畫面還是完整的
+
+/* ---------- 退場：九格隨機錯落地掉到畫面下方（像重力一樣越掉越快） ---------- */
+const OUTRO_FROM = 42040;                // 開始掉（毫秒，歌曲時間）
+const OUTRO_TO = 44210;                  // 最慢的那一格完全掉出畫面（slit 從這裡開始）
+const OUTRO_SPREAD = 0.45;               // 九格開始掉的時間隨機錯開多少（佔整段時間的比例；0 = 一起掉）
 
 /* ---------- 效果的尺寸 ----------
    grainrad 的參數（間距 11、方塊 15…）是以 1280 × 720 的鏡頭畫面為單位。
@@ -42,7 +48,7 @@ const EFFECT_SCALE = 1;
 /* ---------- 九種效果的參數（照截圖） ---------- */
 const FX = {
   halftone:  { brightness: 15, contrast: 0, spacing: 11, angle: 45 },               // 01 Circle、Original
-  ascii:     { brightness: 25, contrast: 0, scale: 2, spacing: 0.3 },                // 02 DETAILED、Original、背景黑
+  ascii:     { brightness: 25, contrast: 0, scale: 3, spacing: 0.3 },                // 02 DETAILED、Original、背景黑
   contour:   { brightness: 30, contrast: -5, levels: 6, lineThickness: 0.5, lineColor: '#e0714f' },   // 03 Filled Bands、Original
   noise:     { brightness: 13, contrast: -5, scale: 100, intensity: 3, speed: 0.1 },  // 04 Perlin、1 octave、Animate
   blockify:  { brightness: 10, contrast: 0, blockSize: 15 },                         // 05 Full Blocks、Preserve Colors
@@ -75,7 +81,7 @@ const HOME = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 export default {
   name: 'divide',
   needs: { camera: true },
-  dev: { from: 29800, to: 40628 },
+  dev: { from: 29800, to: 44210 },
 
   async preload(stage) {
     this.canvas = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
@@ -87,7 +93,7 @@ export default {
     if (this.gl) this.gl.draw(null, this.layout(stage), 0, HOME.map(c => ({ fx: c, a: 0, x: 0, y: 0, sx: 0, sy: 0 })), 0);
     // 點畫面：換位子
     stage.root.style.touchAction = 'manipulation';
-    stage.root.addEventListener('pointerdown', () => { if (this.active) this.shuffle(); });
+    stage.root.addEventListener('pointerdown', () => { if (this.active && this.ms < OUTRO_FROM) this.shuffle(); });   // 開始掉了就不換
   },
 
   reset() {
@@ -95,6 +101,10 @@ export default {
     this.slot = HOME.slice();             // 第 c 格（第 c 種效果）現在在哪個位置
     this.tapOrder = HOME.slice();         // 換位子後重新淡入的順序
     this.tapAt = -Infinity;
+    // 退場：每一格什麼時候開始掉（佔整段時間的比例）；順序隨機，間隔也稍微不規則
+    const rank = shuffled(HOME);
+    this.fallAt = HOME.map(c => (rank.indexOf(c) + Math.random() * 0.8) / 9 * OUTRO_SPREAD);
+    this.ms = 0;
   },
 
   enter() { this.active = true; this.reset(); },
@@ -122,7 +132,15 @@ export default {
     if (!this.gl) return;
     const L = this.layout(stage), sx = L.cw + GAP, sy = L.ch + GAP;
     const t = f ? f.local * 1000 : INTRO;          // 進場進度（毫秒，照音樂時間）
+    const ms = (this.ms = f ? f.t * 1000 : 0);
     const sinceTap = performance.now() - this.tapAt;
+    // 退場：重力加速度取「最慢的那一格剛好在 OUTRO_TO 掉出畫面」
+    const T = (OUTRO_TO - OUTRO_FROM) / 1000, H = stage.height;
+    let g = 0;
+    for (let c = 0; c < 9; c++) {
+      const top = L.y + slotXY(this.slot[c]).y * sy, left = T * (1 - this.fallAt[c]);
+      g = Math.max(g, 2 * (H - top + 2) / (left * left));
+    }
     const cards = [];
     for (let c = 0; c < 9; c++) {
       const start = this.order.indexOf(c) * (INTRO - CARD_FADE) / 8;
@@ -130,7 +148,9 @@ export default {
       const a = smooth(clamp01((t - start) / CARD_FADE)) * smooth(clamp01((sinceTap - tapStart) / TAP_FADE));
       if (a <= 0) continue;
       const p = slotXY(this.slot[c]);
-      const x = p.x * sx, y = p.y * sy;             // 相對九宮格左上角
+      const fall = Math.max(0, (ms - OUTRO_FROM) / 1000 - this.fallAt[c] * T);   // 這一格掉了幾秒
+      const x = p.x * sx, y = p.y * sy + 0.5 * g * fall * fall;   // 相對九宮格左上角
+      if (L.y + y > H) continue;                    // 已經掉出畫面
       const home = slotXY(c);
       cards.push({
         fx: c, a, x: L.x + x, y: L.y + y,

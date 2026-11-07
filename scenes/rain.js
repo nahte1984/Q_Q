@@ -2,7 +2,7 @@
    rain — 符號雨
    --------------------------------------------------------------------------
    0 ms        按下 PLAY，介面淡出、背景的色彩交融留著，開始下白色的符號雨
-   8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（彩度 -30%、壓 40% 黑、加細顆粒），2 小節後完全出現；
+   8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（套 color.CUBE 調色、壓 40% 黑、加細顆粒），2 小節後完全出現；
                之後落下的符號有顏色（從紫色開始繞色相環），碰到頭會彈開
    16000 ms    「每個人都是一種文體」拆成一個一個白色的字，打散混在符號裡落下
    19000 ms    「你覺得你是哪一種」拆成一個一個白色的字，打散混在符號裡落下
@@ -12,6 +12,7 @@
    ========================================================================== */
 
 import { colorBlend, COLORS } from './loading.js';
+import { LUT_FILE, parseCube, LUT_GLSL, uploadLut } from './lut.js';
 
 /* ---------- 可以調整的數字 ---------- */
 const SYMBOLS = '!@#$%^&*,;:\'"?】◎§—/…《、·(>{%∞〃※';
@@ -32,7 +33,7 @@ const PHRASES = [
 const COLOR_AT = 8389;                   // 第 4 小節第 1 拍：開始有顏色、碰到頭會彈開
 const CAMERA_AT = 8389;                  // 鏡頭從這裡開始淡入
 const CAMERA_FADE = 3582;                // 淡入花多久（2 小節）
-const CAMERA_LUT = '../lut/color.CUBE';  // 鏡頭的調色（.cube 檔，路徑相對於這個檔案；大小寫要和檔名一樣）。不要調色就改成 null
+const CAMERA_LUT = LUT_FILE;             // 鏡頭的調色（lut/color.CUBE，設定在 lut.js）。不要調色就改成 null
 const CAMERA_DARK = 0.4;                 // 調色之後再壓 40% 的黑
 // 鏡頭的顆粒：參考 grainrad 的 Grain（預設大小 2、強度 35），這裡顆粒細一半、強度弱一半。每一幀都會變
 const GRAIN_SIZE = 0.5;                  // 顆粒大小（px）；grainrad 預設約 1px
@@ -290,20 +291,12 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform sampler2D uTex, uLut;
-uniform vec2 uRes, uScale, uSeed, uLutTex;
-uniform vec3 uDomMin, uDomMax;
-uniform float uUseLut, uLutN, uLutCols, uDark, uGrain, uGrainPx;
+uniform sampler2D uTex;
+uniform vec2 uRes, uScale, uSeed;
+uniform float uUseLut, uDark, uGrain, uGrainPx;
+${LUT_GLSL}
 // 不用 sin 的雜訊（手機上也不會出現規則的紋路）
 float hash(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
-// 3D LUT：每一層藍色是一塊 N×N（橫軸紅、直軸綠），排成格狀放在一張 2D 圖裡；相鄰兩層之間再內插
-vec2 lutPos(float b, vec2 rg){ return (vec2(mod(b, uLutCols), floor(b / uLutCols)) * uLutN + rg) / uLutTex; }
-vec3 lut(vec3 c){
-  c = clamp((c - uDomMin) / (uDomMax - uDomMin), 0.0, 1.0) * (uLutN - 1.0);
-  float b0 = floor(c.b), b1 = min(b0 + 1.0, uLutN - 1.0);
-  vec2 rg = c.rg + 0.5;
-  return mix(texture2D(uLut, lutPos(b0, rg)).rgb, texture2D(uLut, lutPos(b1, rg)).rgb, c.b - b0);
-}
 void main(){
   vec2 uv = gl_FragCoord.xy / uRes;
   vec2 t = (uv - 0.5) * uScale + 0.5;            // 像 object-fit: cover 一樣鋪滿
@@ -342,7 +335,6 @@ void main(){
   const u = n => gl.getUniformLocation(prog, n);
   const U = { res: u('uRes'), scale: u('uScale'), seed: u('uSeed'), dark: u('uDark'), grain: u('uGrain'), px: u('uGrainPx'), useLut: u('uUseLut') };
   gl.uniform1i(u('uTex'), 0);
-  gl.uniform1i(u('uLut'), 1);
   gl.uniform1f(U.useLut, 0);
   gl.uniform1f(U.dark, CAMERA_DARK);
   gl.uniform1f(U.grain, GRAIN_AMOUNT);
@@ -360,36 +352,7 @@ void main(){
     // 套用調色：L 是 parseCube() 的結果；傳 null 就不調色
     setLut(L) {
       if (!L) { gl.uniform1f(U.useLut, 0); return; }
-      const n = L.size, cols = Math.ceil(Math.sqrt(n)), rows = Math.ceil(n / cols);
-      const w = cols * n, h = rows * n;
-      const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-      if (w > max || h > max) throw new Error(`LUT 太大（${n}），這支手機放不下`);
-      const px = new Uint8Array(w * h * 4);
-      for (let b = 0, i = 0; b < n; b++) {
-        const ox = (b % cols) * n, oy = Math.floor(b / cols) * n;
-        for (let g = 0; g < n; g++) for (let r = 0; r < n; r++, i++) {
-          const o = ((oy + g) * w + ox + r) * 4;
-          px[o] = Math.round(L.data[i * 3] * 255);
-          px[o + 1] = Math.round(L.data[i * 3 + 1] * 255);
-          px[o + 2] = Math.round(L.data[i * 3 + 2] * 255);
-          px[o + 3] = 255;
-        }
-      }
-      gl.activeTexture(gl.TEXTURE1);
-      if (!lutTex) lutTex = gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D, lutTex);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.uniform1f(u('uLutN'), n);
-      gl.uniform1f(u('uLutCols'), cols);
-      gl.uniform2f(u('uLutTex'), w, h);
-      gl.uniform3fv(u('uDomMin'), L.min);
-      gl.uniform3fv(u('uDomMax'), L.max);
+      lutTex = uploadLut(gl, prog, L, 1, lutTex);
       gl.uniform1f(U.useLut, 1);
     },
     draw(video) {
@@ -411,27 +374,6 @@ void main(){
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
   };
-}
-
-/* ---------- 讀 .cube 調色檔（Photoshop、DaVinci、Premiere 匯出的 3D LUT） ---------- */
-function parseCube(buf) {
-  const text = new TextDecoder().decode(buf);
-  let size = 0, min = [0, 0, 0], max = [1, 1, 1], data = null, k = 0;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line[0] === '#') continue;
-    const parts = line.split(/\s+/);
-    const key = parts[0].toUpperCase();
-    if (key === 'LUT_3D_SIZE') { size = parseInt(parts[1], 10); data = new Float32Array(size * size * size * 3); }
-    else if (key === 'LUT_1D_SIZE') throw new Error('這是 1D LUT，請匯出 3D LUT');
-    else if (key === 'DOMAIN_MIN') min = parts.slice(1, 4).map(Number);
-    else if (key === 'DOMAIN_MAX') max = parts.slice(1, 4).map(Number);
-    else if (data && /^[-+.\d]/.test(key) && k < data.length) {
-      for (let j = 0; j < 3; j++) data[k++] = Math.min(1, Math.max(0, parseFloat(parts[j]) || 0));
-    }
-  }
-  if (!size || k !== size * size * size * 3) throw new Error(`.cube 檔格式不對（讀到 ${k / 3} 個顏色）`);
-  return { size, min, max, data };
 }
 
 /* ---------- 臉部偵測（Blazeface，在背景執行緒，和 purpleRain 同一套） ---------- */
