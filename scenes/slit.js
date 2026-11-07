@@ -12,7 +12,7 @@
    背景色 #313131（第一輪還沒掃到的地方）。
    鏡頭畫面套 lut/color.CUBE 的調色（和 rain 一樣，設定在 lut.js）。
 
-   64482 – 71971 ms  五角星（images/slit-5star.svg）像遮罩一樣從畫面中心由最小長到最大，
+   64482 – 69260 ms  五角星（images/slit-5star.svg）像遮罩一樣從畫面中心由最小長到最大，
               星星裡面慢慢露出背景（#313131），最後整個畫面都是背景；
    68105 ms   背景上直排的「看故事謎底玩解讀遊戲」淡入（Figma Page 1）。
 
@@ -46,7 +46,7 @@ const MAX_DPR = 2;
 // 最後：五角星形的遮罩從畫面中心由小到大，裡面露出背景
 const REVEAL = {
   shape: '../images/slit-5star.svg',
-  from: 64482, to: 71971,               // 從最小長到整個畫面都在星星裡（毫秒）
+  from: 64482, to: 69260,               // 從最小長到整個畫面都在星星裡（毫秒）
   bg: '#313131',
   // 背景上的字（Figma：BIZ UDPMincho 22px、行高 27px、#F8EFCE，直排置中）；空字串 = 空一行
   lines: ['看', '故', '事', '謎', '底', '', '玩', '解', '讀', '遊', '戲'],
@@ -69,7 +69,7 @@ const clamp01 = x => Math.max(0, Math.min(1, x));
 export default {
   name: 'slit',
   needs: { camera: true },
-  dev: { from: 44210, to: 71971 },
+  dev: { from: 44210, to: 70552 },
 
   async preload(stage) {
     // 每一輪的形狀算成「角度 → 外框半徑」的表（最遠的一點 = 1）
