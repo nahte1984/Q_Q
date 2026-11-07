@@ -3,11 +3,11 @@
    --------------------------------------------------------------------------
    0 ms        按下 PLAY，介面淡出、背景的色彩交融留著，開始下白色的符號雨
    8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（套 color.CUBE 調色、壓 40% 黑、加細顆粒），2 小節後完全出現；
-               之後落下的符號有顏色（從紫色開始繞色相環），碰到頭會彈開
+               之後落下的符號有顏色（Figma 那五個顏色用隨機的順序循環、慢慢漸變），碰到頭會彈開
    16000 ms    「每個人都是一種文體」拆成一個一個白色的字，打散混在符號裡落下
    19000 ms    「你覺得你是哪一種」拆成一個一個白色的字，打散混在符號裡落下
 
-   效能：符號在載入時先畫成一張小圖集（每個符號 × 白色＋36 種顏色），之後每幀只是貼圖。
+   效能：符號在載入時先畫成一張小圖集（每個符號 × 白色＋漸變的每一階顏色），之後每幀只是貼圖。
    臉部偵測（Blazeface）在背景執行緒跑，不會卡住動畫。
    ========================================================================== */
 
@@ -38,8 +38,10 @@ const CAMERA_DARK = 0.4;                 // 調色之後再壓 40% 的黑
 // 鏡頭的顆粒：參考 grainrad 的 Grain（預設大小 2、強度 35），這裡顆粒細一半、強度弱一半。每一幀都會變
 const GRAIN_SIZE = 0.5;                  // 顆粒大小（px）；grainrad 預設約 1px
 const GRAIN_AMOUNT = 0.175;              // 強度：每顆亮度最多加減這個值的一半（grainrad 預設 0.35）
-const HUE_START = 270;                   // 從紫色開始
-const HUE_CYCLE = 15000;                 // 繞色相環一圈的毫秒數（和 purpleRain 一樣）
+// 鏡頭淡入之後符號的顏色：這五個顏色用隨機的順序循環（Figma Page 1 左邊那五個）
+const RAIN_COLORS = ['#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3'];
+const COLOR_STEP = 4500;                 // 每一個顏色漸變到下一個顏色的毫秒數
+const COLOR_SMOOTH = 6;                  // 每段漸變分成幾階（越多越順，但圖集越大）
 
 // 整體速度：1 = 原本，0.5 = 慢一半。落下、飄移、彈開、旋轉都一起變慢，像慢動作
 const SPEED = 0.5;
@@ -53,16 +55,42 @@ const MODEL_URL = '../models/blazeface/model.json';   // 臉部偵測模型（�
 /* ---------- 圖集設定 ---------- */
 const UNIQUE = [...new Set(Array.from(SYMBOLS))];    // 重複的符號只算一次，每個符號出現的機率都一樣
 const PICK = UNIQUE.map((_, i) => i);
-const HUE_STEPS = 36;                                 // 每 10° 一種顏色
 const BAKE = 60, CELL = 76;                           // 圖集裡每個符號的字級與格子大小（像素）
 const CHAR_BAKE = CHAR_SIZE_MAX * 2;                  // 句子的字預先畫好的字級（像素）
 
 const clamp01 = x => (x < 0 ? 0 : x > 1 ? 1 : x);
-const hueIndex = ms => {
-  const h = HUE_START + (ms - COLOR_AT) / HUE_CYCLE * 360;
-  return ((Math.round(h / (360 / HUE_STEPS)) % HUE_STEPS) + HUE_STEPS) % HUE_STEPS;
+// 顏色的順序：每次打開網頁都重新洗牌；五個用完再洗一次，接起來的地方不會連續同一個顏色。
+// 排到 rain 結束（加上轉場）為止，之後從頭接回去（最後一個也和第一個不同）
+const PALETTE = (() => {
+  const need = Math.max(2, Math.ceil((31100 - COLOR_AT) / COLOR_STEP) + 1);   // 用得到的顏色數
+  const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  let seq;
+  for (let tries = 0; tries < 100; tries++) {
+    seq = [];
+    while (seq.length < need) {
+      let bag;
+      do bag = shuffle(RAIN_COLORS); while (seq.length && bag[0] === seq[seq.length - 1] && RAIN_COLORS.length > 1);
+      seq.push(...bag);
+    }
+    seq = seq.slice(0, need);
+    if (seq[need - 1] !== seq[0]) break;
+  }
+  const rgb = h => { const v = parseInt(h.slice(1), 16); return [v >> 16 & 255, v >> 8 & 255, v & 255]; };
+  const rows = [];                                     // 每一段漸變的每一階
+  for (let i = 0; i < seq.length; i++) {
+    const a = rgb(seq[i]), b = rgb(seq[(i + 1) % seq.length]);
+    for (let k = 0; k < COLOR_SMOOTH; k++) {
+      const f = k / COLOR_SMOOTH;
+      rows.push(`rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * f)).join(',')})`);
+    }
+  }
+  return rows;
+})();
+// 某個時間點落下的符號是第幾種顏色（第 0 列是白色）
+const colorRow = ms => {
+  const u = (ms - COLOR_AT) / COLOR_STEP * COLOR_SMOOTH;
+  return 1 + ((Math.floor(u) % PALETTE.length) + PALETTE.length) % PALETTE.length;
 };
-const hueColor = i => `hsl(${i * 360 / HUE_STEPS}, 100%, 55%)`;
 
 export default {
   name: 'rain',
@@ -222,7 +250,7 @@ function newSymbol(W, ms) {
     vy: (FALL_MIN + Math.random() * (FALL_MAX - FALL_MIN)) * (0.85 + big * 0.3),   // 大的稍快，有一點遠近感
     rot: (Math.random() - 0.5) * 0.6, vr: (Math.random() - 0.5) * 0.8 * SPEED,
     size, col: PICK[(Math.random() * PICK.length) | 0],
-    row: ms >= COLOR_AT ? 1 + hueIndex(ms) : 0,        // 第 0 列是白色
+    row: ms >= COLOR_AT ? colorRow(ms) : 0,            // 第 0 列是白色
     bouncing: false,
   };
 }
@@ -238,7 +266,7 @@ function newChar(W, sprite) {
   };
 }
 
-/* ---------- 圖集：每個符號 × 白色＋36 種顏色 ---------- */
+/* ---------- 圖集：每個符號 × 白色＋漸變的每一階顏色 ---------- */
 function bakeAtlas() {
   const n = UNIQUE.length;
   const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
@@ -253,14 +281,14 @@ function bakeAtlas() {
     const a = m.actualBoundingBoxAscent ?? BAKE * 0.8, de = m.actualBoundingBoxDescent ?? BAKE * 0.2;
     wg.fillText(ch, i * CELL + (CELL - (l + r)) / 2 + l, (CELL - (a + de)) / 2 + a);
   });
-  const atlas = mk(n * CELL, (HUE_STEPS + 1) * CELL), ag = atlas.getContext('2d');
+  const atlas = mk(n * CELL, (PALETTE.length + 1) * CELL), ag = atlas.getContext('2d');
   ag.drawImage(white, 0, 0);
   const tmp = mk(n * CELL, CELL), tg = tmp.getContext('2d');
-  for (let k = 0; k < HUE_STEPS; k++) {
+  for (let k = 0; k < PALETTE.length; k++) {
     tg.globalCompositeOperation = 'copy';
     tg.drawImage(white, 0, 0);
     tg.globalCompositeOperation = 'source-in';
-    tg.fillStyle = hueColor(k);
+    tg.fillStyle = PALETTE[k];
     tg.fillRect(0, 0, tmp.width, tmp.height);
     ag.drawImage(tmp, 0, (k + 1) * CELL);
   }
