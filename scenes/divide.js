@@ -3,7 +3,7 @@
    --------------------------------------------------------------------------
    29800 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
               點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）。
-   42040 ms   九格隨機錯落地往下掉，最慢的那一格在 44210 ms 完全掉出畫面（接著 slit 開始）。
+   42040 ms   九格隨機錯落地往下掉（各自帶一點自轉和左右偏移），最慢的那一格在 44210 ms 完全掉出畫面（接著 slit 開始）。
               前鏡頭畫面鋪滿整個九宮格（像 object-fit: cover），每一格只露出自己那一塊，
               再各自套一種 grainrad 的效果；九格拼起來就是原本完整的鏡頭畫面（格子之間的縫會蓋掉一點）。
    版面：      格子和格子、格子和瀏覽器邊界都距離 5px，九宮格放到最大，直到碰到畫面的寬或高；
@@ -31,13 +31,18 @@ const CARD_FADE = 500;                   // 每一格淡入花多久（毫秒）
 /* ---------- 點畫面：九個格子隨機換位子 ---------- */
 const TAP_FADE = 200;                    // 每一格重新淡入花多久（毫秒）
 const TAP_SPREAD = 200;                  // 九格的淡入開始時間在這段時間裡隨機錯開（毫秒；0 = 九格一起淡入）
-const SHUFFLE_CARRIES_IMAGE = true;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
+const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
                                          // false：只有效果換位子，畫面還是完整的
 
 /* ---------- 退場：九格隨機錯落地掉到畫面下方（像重力一樣越掉越快） ---------- */
 const OUTRO_FROM = 42040;                // 開始掉（毫秒，歌曲時間）
 const OUTRO_TO = 44210;                  // 最慢的那一格完全掉出畫面（slit 從這裡開始）
 const OUTRO_SPREAD = 0.45;               // 九格開始掉的時間隨機錯開多少（佔整段時間的比例；0 = 一起掉）
+// 每一格掉的時候隨機帶一點自轉和左右偏移（同一格往哪邊轉就往哪邊偏，像失去平衡倒下去）
+const FALL_SPIN = [4, 18];               // 一開始的自轉速度（度/秒，隨機在這個範圍內）
+const FALL_SPIN_ACC = [4, 20];           // 自轉越轉越快（度/秒²）
+const FALL_DRIFT = [5, 30];              // 一開始的左右偏移速度（px/秒）
+const FALL_DRIFT_ACC = [0, 20];          // 左右偏移越來越快（px/秒²）
 
 /* ---------- 效果的尺寸 ----------
    grainrad 的參數（間距 11、方塊 15…）是以 1280 × 720 的鏡頭畫面為單位。
@@ -48,11 +53,11 @@ const EFFECT_SCALE = 1;
 /* ---------- 九種效果的參數（照截圖） ---------- */
 const FX = {
   halftone:  { brightness: 15, contrast: 0, spacing: 11, angle: 45 },               // 01 Circle、Original
-  ascii:     { brightness: 25, contrast: 0, scale: 3, spacing: 0.3 },                // 02 DETAILED、Original、背景黑
+  ascii:     { brightness: 25, contrast: 0, scale: 2, spacing: 0.3 },                // 02 DETAILED、Original、背景黑
   contour:   { brightness: 30, contrast: -5, levels: 6, lineThickness: 0.5, lineColor: '#e0714f' },   // 03 Filled Bands、Original
   noise:     { brightness: 13, contrast: -5, scale: 100, intensity: 3, speed: 0.1 },  // 04 Perlin、1 octave、Animate
   blockify:  { brightness: 10, contrast: 0, blockSize: 15 },                         // 05 Full Blocks、Preserve Colors
-  dithering: { brightness: -30, contrast: -30, gamma: 2, matrix: 8 },                 // 06 Bayer 8x8、Original、背景黑
+  dithering: { brightness: -30, contrast: -30, gamma: 2, matrix: 6 },                 // 06 Bayer 8x8、Original、背景黑
   dots:      { brightness: 10, contrast: 0, size: 1, spacing: 2 },                    // 07 Diamond、Square Grid、Original
   voronoi:   { brightness: 5, contrast: 0, cellSize: 20, randomize: 1 },              // 08 Cell Average、Edge Width 0
   threshold: { brightness: -15, contrast: -25, levels: 6 },                           // 09 Threshold Point 0.1（6 階時用不到）、Original
@@ -104,6 +109,11 @@ export default {
     // 退場：每一格什麼時候開始掉（佔整段時間的比例）；順序隨機，間隔也稍微不規則
     const rank = shuffled(HOME);
     this.fallAt = HOME.map(c => (rank.indexOf(c) + Math.random() * 0.8) / 9 * OUTRO_SPREAD);
+    const rnd = ([a, b]) => a + Math.random() * (b - a);
+    this.fall = HOME.map(() => {
+      const dir = Math.random() < 0.5 ? -1 : 1;      // 往左倒或往右倒
+      return { spin: dir * rnd(FALL_SPIN), spinAcc: dir * rnd(FALL_SPIN_ACC), drift: dir * rnd(FALL_DRIFT), driftAcc: dir * rnd(FALL_DRIFT_ACC) };
+    });
     this.ms = 0;
   },
 
@@ -134,12 +144,12 @@ export default {
     const t = f ? f.local * 1000 : INTRO;          // 進場進度（毫秒，照音樂時間）
     const ms = (this.ms = f ? f.t * 1000 : 0);
     const sinceTap = performance.now() - this.tapAt;
-    // 退場：重力加速度取「最慢的那一格剛好在 OUTRO_TO 掉出畫面」
-    const T = (OUTRO_TO - OUTRO_FROM) / 1000, H = stage.height;
+    // 退場：重力加速度取「最慢的那一格剛好在 OUTRO_TO 掉出畫面」（格子會轉，所以用對角線的一半當作它最大的半徑）
+    const T = (OUTRO_TO - OUTRO_FROM) / 1000, H = stage.height, R = Math.hypot(L.cw, L.ch) / 2 + 2;
     let g = 0;
     for (let c = 0; c < 9; c++) {
-      const top = L.y + slotXY(this.slot[c]).y * sy, left = T * (1 - this.fallAt[c]);
-      g = Math.max(g, 2 * (H - top + 2) / (left * left));
+      const cy = L.y + slotXY(this.slot[c]).y * sy + L.ch / 2, left = T * (1 - this.fallAt[c]);
+      g = Math.max(g, 2 * (H + R - cy) / (left * left));
     }
     const cards = [];
     for (let c = 0; c < 9; c++) {
@@ -148,13 +158,16 @@ export default {
       const a = smooth(clamp01((t - start) / CARD_FADE)) * smooth(clamp01((sinceTap - tapStart) / TAP_FADE));
       if (a <= 0) continue;
       const p = slotXY(this.slot[c]);
-      const fall = Math.max(0, (ms - OUTRO_FROM) / 1000 - this.fallAt[c] * T);   // 這一格掉了幾秒
-      const x = p.x * sx, y = p.y * sy + 0.5 * g * fall * fall;   // 相對九宮格左上角
-      if (L.y + y > H) continue;                    // 已經掉出畫面
+      const x = p.x * sx, y = p.y * sy;             // 格子原本的位置（相對九宮格左上角）
+      const fl = this.fall[c], k = Math.max(0, (ms - OUTRO_FROM) / 1000 - this.fallAt[c] * T);   // 這一格掉了幾秒
+      const dx = fl.drift * k + 0.5 * fl.driftAcc * k * k;
+      const dy = 0.5 * g * k * k;
+      const rot = (fl.spin * k + 0.5 * fl.spinAcc * k * k) * Math.PI / 180;
+      if (L.y + y + L.ch / 2 + dy - R > H) continue;   // 已經掉出畫面
       const home = slotXY(c);
       cards.push({
-        fx: c, a, x: L.x + x, y: L.y + y,
-        sx: SHUFFLE_CARRIES_IMAGE ? home.x * sx : x,   // 這一格的畫面從九宮格的哪裡取
+        fx: c, a, x: L.x + x + dx, y: L.y + y + dy, rot,
+        sx: SHUFFLE_CARRIES_IMAGE ? home.x * sx : x,   // 這一格的畫面從九宮格的哪裡取（掉下去時畫面跟著格子走）
         sy: SHUFFLE_CARRIES_IMAGE ? home.y * sy : y,
       });
     }
@@ -187,10 +200,12 @@ function effectLayer(canvas, atlas) {
 attribute vec2 p;
 uniform vec2 uRes;
 uniform vec4 uRect;          // 這一格在畫面上的位置（裝置像素，四邊各多 1px 讓邊緣柔化）
-varying vec2 vLocal;         // 格子裡的位置（裝置像素）
+uniform vec2 uRot;           // 自轉（cos, sin），繞格子中心
+varying vec2 vLocal;         // 格子裡的位置（裝置像素，跟著格子一起轉）
 void main(){
-  vec2 px = uRect.xy + p * uRect.zw;
-  vLocal = p * uRect.zw - 1.0;
+  vec2 local = p * uRect.zw, mid = uRect.zw * 0.5, d = local - mid;
+  vec2 px = uRect.xy + mid + vec2(d.x * uRot.x - d.y * uRot.y, d.x * uRot.y + d.y * uRot.x);
+  vLocal = local - 1.0;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
 }`;
   const fs = `
@@ -399,7 +414,7 @@ void main(){
 
   const u = n => gl.getUniformLocation(prog, n);
   const U = {};
-  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uRadius', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
+  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uRadius', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uRot', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
   gl.uniform1i(u('uCam'), 0);
   gl.uniform1i(u('uAtlas'), 1);
   gl.uniform3fv(u('uLine'), hex(P.contour.lineColor));
@@ -449,6 +464,7 @@ void main(){
       gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
       for (const c of cards) {
         gl.uniform4f(U.uRect, c.x * d - 1, c.y * d - 1, L.cw * d + 2, L.ch * d + 2);
+        gl.uniform2f(U.uRot, Math.cos(c.rot || 0), Math.sin(c.rot || 0));
         gl.uniform2f(U.uSrc, c.sx * d, c.sy * d);
         gl.uniform1f(U.uFx, c.fx);
         gl.uniform1f(U.uAlpha, c.a);
