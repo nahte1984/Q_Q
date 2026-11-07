@@ -21,11 +21,13 @@ const SPEED = 1;
 const COVER = '../images/cover.webp';
 // 進度線下面那行字
 const CAPTION = 'Interactive Experience (BETA)';
-// 標題「每個人都是一種文體」：卡片出現時，九個字用隨機的順序一個一個快速淡入
+// 標題「每個人都是一種文體」：卡片出現時，九個字用隨機的順序一個一個快速淡入；
+// 之後每 TITLE_REPEAT 毫秒重來一次（每次順序都重新隨機），每個字輪到時先消失再淡入
 const TITLE_LINES = ['每個人', '都是', '一種文體'];
-const TITLE_CHAR_FADE = 1300;             // 每個字淡入多久（毫秒）
+const TITLE_CHAR_FADE = 1500;             // 每個字淡入多久（毫秒）
 const TITLE_CHAR_GAP = 70;               // 字和字開始淡入的間隔（毫秒）
 const TITLE_DELAY = 300;                 // 卡片開始淡入之後，過多久開始出字（毫秒）
+const TITLE_REPEAT = 5000;               // 每隔多久重新淡入一次（毫秒）
 
 const CSS = `
 .ld{position:absolute;inset:0;overflow:hidden;background:#f8efce;transition:opacity ${FADE_OUT}ms ease}
@@ -37,8 +39,6 @@ const CSS = `
 .ld.in .ld-card{opacity:1}
 .ld-cover{position:absolute;left:0;top:0;width:235px;height:235px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);object-fit:cover;display:block;background:#d2d6d3}
 .ld-title{position:absolute;left:-1px;top:251px;font:32px/42px "BIZ UDPMincho","Hiragino Mincho ProN","Songti TC",serif;color:#748180;white-space:nowrap}
-.ld-ch{opacity:0;transition-property:opacity;transition-timing-function:ease-out}
-.ld.in .ld-ch{opacity:1}
 .ld-artist{position:absolute;right:0;top:259px;width:19px;font:19px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#748180;text-align:center}
 .ld-line{position:absolute;left:0;top:402px;width:235px;height:1px;background:#fff}
 .ld-line i{position:absolute;left:0;top:0;height:100%;width:0;background:#748180}
@@ -108,7 +108,12 @@ export default {
     const img = el.querySelector('.ld-cover');
     const imgP = new Promise(r => { img.onload = img.onerror = r; img.src = ctx.asset(COVER); });
     const root = this.root;
-    Promise.race([Promise.all([imgP, fontsReady()]), wait(2500)]).then(() => root.classList.add('in'));
+    Promise.race([Promise.all([imgP, fontsReady()]), wait(2500)]).then(() => {
+      if (this.root !== root) return;
+      root.classList.add('in');
+      fadeTitle(root, true);                                           // 第一次：九個字都先藏起來，再一個一個淡入
+      this.titleTimer = setInterval(() => fadeTitle(root, false), TITLE_REPEAT);   // 之後每 5 秒重來
+    });
 
     let last = performance.now();
     const tick = now => {
@@ -158,6 +163,7 @@ export default {
 
   stop() {
     cancelAnimationFrame(this.raf);
+    clearInterval(this.titleTimer);
     if (this.bg) this.bg.destroy();
     this.bg = null;
     if (this._fit) removeEventListener('resize', this._fit);
@@ -165,16 +171,26 @@ export default {
   },
 };
 
-// 標題的每個字包成一個 span，淡入的先後順序每次隨機
+// 標題的每個字包成一個 span
 function titleHTML() {
-  const chars = TITLE_LINES.join('').split('');
-  const order = chars.map((_, i) => i);
+  return TITLE_LINES.map(line => line.split('').map(ch => `<span class="ld-ch">${ch}</span>`).join('')).join('<br>');
+}
+
+// 九個字用隨機的順序一個一個淡入。first：第一次（還沒輪到的字先藏起來）；之後每個字輪到時才消失再淡入
+function fadeTitle(root, first) {
+  const spans = [...root.querySelectorAll('.ld-ch')];
+  if (!spans.length || !spans[0].animate) return;
+  const order = spans.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
-  let k = 0;
-  return TITLE_LINES.map(line => line.split('').map(ch => {
-    const delay = TITLE_DELAY + order.indexOf(k++) * TITLE_CHAR_GAP;
-    return `<span class="ld-ch" style="transition-duration:${TITLE_CHAR_FADE}ms;transition-delay:${delay}ms">${ch}</span>`;
-  }).join('')).join('<br>');
+  spans.forEach((sp, i) => {
+    sp.getAnimations().forEach(a => a.cancel());
+    sp.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: TITLE_CHAR_FADE,
+      delay: (first ? TITLE_DELAY : 0) + order.indexOf(i) * TITLE_CHAR_GAP,
+      easing: 'ease-out',
+      fill: first ? 'backwards' : 'none',
+    });
+  });
 }
 
 async function fontsReady() {
