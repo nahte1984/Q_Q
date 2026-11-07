@@ -38,7 +38,8 @@ const MV_TITLE = '每個人都是一種文體';
 // ・壓上 30% 黑和「Vertical View Only」提示
 // 電腦不受影響（視窗多寬都照常排版）。手機的判斷：觸控螢幕，而且螢幕短邊 ≤ 600px
 const LANDSCAPE_RATIO = 1;
-function isPhone() {
+// 手機：觸控、而且螢幕短邊不超過 600px（各個互動也可以用：import { isPhone } from '../stage.js'）
+export function isPhone() {
   try {
     const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
     return touch && Math.min(screen.width, screen.height) <= 600;
