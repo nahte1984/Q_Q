@@ -48,7 +48,7 @@ function isPhone() {
 // 共用字型（Google Fonts）。中文字型只下載用到的字，所以文字有改的話，這裡也要補上新的字
 const FONT_TEXT = {
   // BIZ UDPMincho：載入畫面的標題、rain 的符號雨
-  biz: '每個人都是一種文體' + '!@#$%^&*,;:\'"?】◎§—/…《、·(>{∞〃※',
+  biz: '每個人都是一種文體' + '!@#$%^&*,;:\'"?】◎§—/…《、·(>{∞〃※' + '看故事謎底玩解讀遊戲',
   // Shippori Antique：歌手名、橫式提示
   shippori: '梅林玫羚請把手機轉成直式' + '請同意相機權限',
   // Chiron Sung HK：rain 落下的句子
