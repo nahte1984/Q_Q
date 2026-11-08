@@ -19,11 +19,12 @@
   import { mv } from './stage.js';
 
   // 時間軸：at = 從第幾毫秒開始（對照 timecode.html），scene = scenes/ 裡的檔名
-  // transition = 和上一段之間的轉場：'cut' 直接切換、'fade' 上一段淡出、'over' 這一段疊在上一段上面自己做進場；dur = 轉場的毫秒數
+  // transition = 和上一段之間的轉場：'cut' 直接切換、'fade' 上一段淡出、'over' 這一段疊在上一段上面自己做進場、'under' 這一段先在下面開始，上一段疊在上面自己退場；dur = 轉場的毫秒數
   // 開發時用 index.html?dev 顯示資訊，index.html?dev&from=60000 從 60 秒開始
   mv([
     { at: 0, scene: 'rain' },
-    { at: 29800, scene: 'divide', transition: 'over', dur: 1300 },   // 九宮格隨機一格一格淡入，rain 同時淡出到背景色（divide.js 的 INTRO）
+    { at: 22041, scene: 'divide', transition: 'over', dur: 1300 },   // 九宮格隨機一格一格淡入，rain 同時淡出到背景色（divide.js 的 INTRO）
+    { at: 29589, scene: 'word', transition: 'under', dur: 2170 },   // 文、體：divide 的格子往下掉（到 31759），露出下面的 word；文體 42334 完整消失
     { at: 44210, scene: 'slit' },                                    // 圓形、星星、愛心三輪 slit-scan（時間在 slit.js 的 ROUNDS）
     { at: 70552, scene: 'block' },                                   // 打磚塊：字從 slit 最後的位置飛出去，打碎中間的鏡頭方塊
     { at: 82822, scene: 'replay', transition: 'over', dur: 5000 },   // 結尾：歌曲 5 秒淡出後停住；84822 起背景花 3 秒淡入蓋過 block（block 留到 87822），播完後字和按鈕淡入，按 re-PLAY 從頭播

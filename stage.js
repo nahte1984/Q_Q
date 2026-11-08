@@ -648,7 +648,7 @@ const director = {
         if (next.dur > 0 && next.transition !== 'cut') {
           this.doEnter(next, t, base);
           this.fading.push({ e: prev, start: next.at, dur: next.dur, type: next.transition });
-          prev.rec.st.root.style.zIndex = next.transition === 'over' ? '0' : '2';   // over：下一段疊在上面
+          prev.rec.st.root.style.zIndex = next.transition === 'over' ? '0' : '2';   // over：下一段疊在上面；fade、under：上一段在上面
           prev.rec.st.root.style.pointerEvents = 'none';   // 轉場中的上一段不擋住下一段的互動
         } else {
           this.doExit(prev);
@@ -661,7 +661,7 @@ const director = {
     this.fading = this.fading.filter(fd => {
       const u = t - fd.start;
       if (u < 0 || u >= fd.dur) { this.doExit(fd.e); return false; }
-      if (fd.type !== 'over') fd.e.rec.st.root.style.opacity = String(1 - u / fd.dur);   // over：上一段保持原樣，由下一段自己蓋過去
+      if (fd.type === 'fade') fd.e.rec.st.root.style.opacity = String(1 - u / fd.dur);   // over、under：上一段保持原樣（over 由下一段蓋過去，under 由上一段自己退場）
       return true;
     });
     for (const fd of this.fading) call(fd.e.rec, 'update', this.frameFor(fd.e, t, base));
@@ -889,6 +889,7 @@ function previewLoading(mod, url) {
    timeline: [{ at: 毫秒, scene: 'scenes/ 裡的檔名（不含 .js）', transition: 'fade' | 'over', dur: 轉場毫秒 }, ...]
    ・fade：上一段淡出（舊寫法 fade: 900 也可以）
    ・over：下一段疊在上一段上面，自己做進場（例如 divide 的格子一格一格淡入）；上一段保持原樣，dur 毫秒之後才消失
+   ・under：下一段放在上一段下面先開始；上一段疊在上面自己做退場（例如 divide 的格子往下掉，露出下面的 word），dur 毫秒之後才消失
    ・不寫就是直接切換
    opts.loading: 載入畫面的檔名（預設 'loading'，也就是 scenes/loading.js）
    ========================================================================== */
