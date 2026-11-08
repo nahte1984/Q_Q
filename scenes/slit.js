@@ -93,7 +93,7 @@ export default {
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，slit 不會出現');
     else if (lut) this.gl.setLut(lut);
     // 小圖案畫在上面一層透明的畫布：冒出來時畫一次就好，之後不用重畫
-    this.dots = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
+    this.dots = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });   // 最多 2 倍（和磁頭的畫面一樣）
     this.dctx = this.dots.getContext('2d');
     this.kmax = [];
     this.shapes = [];

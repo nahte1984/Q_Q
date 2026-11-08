@@ -91,7 +91,7 @@ export default {
   dev: { from: 22041, to: 31759 },
 
   async preload(stage) {
-    this.canvas = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
+    this.canvas = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });   // 最多 2 倍（3 倍的手機上看不出差別，顯示卡輕很多）
     await stage.font(`bold ${GLYPH_H}px ${ASCII_FONT}`, ASCII_CHARS);
     this.gl = effectLayer(this.canvas, bakeAtlas());
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，divide 不會出現');

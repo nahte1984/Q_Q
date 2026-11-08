@@ -10,7 +10,7 @@
    點擊畫面     點的地方附近的符號被推開、散開（越近推得越遠），推力慢慢消失之後繼續往下落
 
    效能：符號在載入時先畫成一張小圖集（每個符號 × 白色＋漸變的每一階顏色），之後每幀只是貼圖。
-   臉部偵測（Blazeface）在背景執行緒跑，不會卡住動畫。
+   臉部偵測（Blazeface）在背景執行緒跑，不會卡住動畫；一秒最多 15 次（DETECT_PER_SEC），手機比較省電。
    ========================================================================== */
 
 import { colorBlend, COLORS } from './loading.js';
@@ -70,6 +70,7 @@ const TAP_PUSH = 900;                    // 推開的速度（px/秒，正中間
 const TAP_DRAG = 2.5;                    // 推力消失得多快（越大越快停下來；正中間的符號大約被推開 TAP_PUSH × SPEED ÷ TAP_DRAG px）
 const TAP_SPIN = 6;                      // 推開時加上的自轉（弧度/秒，隨機方向）
 
+const DETECT_PER_SEC = 15;               // 臉部偵測一秒最多幾次（每次都會讓手機的 CPU 忙一下；15 次就跟得上頭的動作）
 const MODEL_URL = '../models/blazeface/model.json';   // 臉部偵測模型（從 purpleRain 搬來）
 
 /* ---------- 圖集設定 ---------- */
@@ -128,7 +129,7 @@ export default {
     if (!this.bg) bg.style.background = '#f8efce';
 
     // 2. 鏡頭：用 WebGL 畫（左右鏡像、套 LUT 調色、壓 40% 黑、加顆粒），用手機原本的解析度，顆粒才夠細
-    this.camCanvas = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
+    this.camCanvas = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });   // 最多 2 倍（3 倍的手機上看不出差別，顯示卡輕很多）
     this.camCanvas.style.opacity = 0;
     this.cam = cameraLayer(this.camCanvas);
     if (!this.cam) console.warn('這個瀏覽器不支援 WebGL，鏡頭畫面不會出現');
@@ -209,7 +210,7 @@ export default {
   update(stage, f) {
     const ms = f.t * 1000;
     const dt = f.playing ? Math.min(f.dt, 0.05) : 0;   // 暫停時整個畫面停住
-    const W = stage.width, H = stage.height, d = stage.dpr;
+    const W = stage.width, H = stage.height, d = this.canvas.width / W;   // 每個 CSS px 是幾個像素（大螢幕上畫布會自動降解析度）
 
     // 往回跳（開發時）：句子可以再出現一次
     if (ms < this.lastMs - 500) this.done = PHRASES.map(p => ms > p.at + 300);
@@ -542,10 +543,14 @@ function startDetector(modelUrl, onFaces) {
   };
   worker.onerror = e => console.warn('臉部偵測錯誤', e.message || e);
   worker.postMessage({ type: 'init', modelUrl, wasmPath: `${CDN}/@tensorflow/tfjs-backend-wasm@4.22.0/dist/` });
+  let lastAt = -1e9;
   det.send = video => {
     if (!det.ready || det.busy || !video.videoWidth) return;
-    dc.width = 256;
-    dc.height = Math.round(256 * video.videoHeight / video.videoWidth);
+    const now = performance.now();
+    if (now - lastAt < 1000 / DETECT_PER_SEC) return;           // 一秒最多 DETECT_PER_SEC 次
+    lastAt = now;
+    const h = Math.round(256 * video.videoHeight / video.videoWidth);
+    if (dc.width !== 256 || dc.height !== h) { dc.width = 256; dc.height = h; }
     dg.drawImage(video, 0, 0, dc.width, dc.height);
     const img = dg.getImageData(0, 0, dc.width, dc.height);
     det.busy = true;
