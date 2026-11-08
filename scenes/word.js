@@ -12,7 +12,7 @@
               兩隻眼睛隨機一前一後，差一點點時間），
               同時從那幾個顏色裡隨機選兩個不重複的顏色換成新的漸層。
    41834 ms   兩個字先略微變大，再迅速縮小到 75% 同時淡出（約半秒，42334 ms 完整消失），背景同時變成 #313131 不透明；
-              之後維持一片 #313131，到 43710 ms 換成 slit。
+              之後維持一片 #313131，到 43210 ms 換成 slit。
 
    index.html：word 用 transition: 'under' 接在 divide 後面（divide 疊在上面自己往下掉），
    全部用同一個 WebGL 畫布畫（形狀先畫成貼圖），顆粒和其他段落一樣。
@@ -104,7 +104,7 @@ const pickColors = not => {
 export default {
   name: 'word',
   needs: { camera: true },
-  dev: { from: START, to: 43710 },
+  dev: { from: START, to: 43210 },
 
   async preload(stage) {
     this.canvas = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });

@@ -5,7 +5,7 @@
    磁頭經過的地方會留下當下那一刻的鏡頭畫面，所以越晚掃到的地方是越晚的畫面。
 
    三輪，每一輪的磁頭不同；前一輪留下的畫面不會清掉，下一輪直接蓋過去。
-     第一輪  43710 – 50478 ms  圓形：從畫面中心由最小長大到整個圓都在畫面外
+     第一輪  43210 – 50478 ms  圓形：從畫面中心由最小長大到整個圓都在畫面外
      第二輪  50479 – 57194 ms  四條線：畫面中心到四個角的四條線，同時往逆時針方向扇形掃過自己那一塊（Figma 30-75）
      第三輪  57195 – 64481 ms  九條線：畫面長寬各切成三等份，每一格一條直線，上下兩排往右、中間一排往左（Figma 30-130）
    每一輪的磁頭同時開始、同時結束。背景色 #313131（第一輪還沒掃到的地方）。
@@ -34,7 +34,7 @@ import { LUT_FILE, parseCube, LUT_GLSL, uploadLut } from './lut.js';
 //   head：'circle'（圓形從中心長大）、SVG 檔（那個形狀從中心長大，用檔案裡第一個 path 的外框）、
 //         'sweep'（中心到四個角的四條線，逆時針掃）、'grid'（九宮格，每格一條直線，上下兩排往右、中間往左）
 const ROUNDS = [
-  { head: 'circle', dots: '../images/slit01.svg', from: 43710, to: 50478 },
+  { head: 'circle', dots: '../images/slit01.svg', from: 43210, to: 50478 },
   { head: 'sweep', dots: '../images/slit02.svg', from: 50479, to: 57194 },
   { head: 'grid', dots: '../images/slit03.svg', from: 57195, to: 64481 },
 ];
@@ -76,7 +76,7 @@ const clamp01 = x => Math.max(0, Math.min(1, x));
 export default {
   name: 'slit',
   needs: { camera: true },
-  dev: { from: 43710, to: 70552 },
+  dev: { from: 43210, to: 70552 },
 
   async preload(stage) {
     // 從中心長大的磁頭：形狀算成「角度 → 外框半徑」的表（最遠的一點 = 1）；四條線、九宮格不用
