@@ -499,8 +499,13 @@ addEventListener('unhandledrejection', e => ui.error(`錯誤：${(e.reason && e.
 /* ---------- 每個互動拿到的 stage ---------- */
 const canvases = [];
 const allRecs = [];
+// 每張畫布最多幾個像素：大螢幕電腦全螢幕時自動降低解析度，舊電腦才跑得動（手機遠低於這個數字，不受影響）。
+// 互動裡要用「畫布寬度 ÷ stage.width」算每個 CSS px 是幾個像素，不要直接用 dpr
+const MAX_CANVAS_PIXELS = 6e6;
 function sizeCanvas(c, opt) {
-  const d = (opt.dpr || shared.dpr) * (opt.scale || 1);
+  let d = (opt.dpr || shared.dpr) * (opt.scale || 1);
+  const px = shared.width * shared.height * d * d;
+  if (px > MAX_CANVAS_PIXELS) d *= Math.sqrt(MAX_CANVAS_PIXELS / px);
   c.width = Math.max(1, Math.round(shared.width * d));
   c.height = Math.max(1, Math.round(shared.height * d));
 }
