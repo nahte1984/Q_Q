@@ -3,16 +3,16 @@
    --------------------------------------------------------------------------
    29589 ms   divide 的九格開始往下掉，露出下面這一段（一片 #313131，加細顆粒）。
    31024 ms   模糊的鏡頭背景淡入（1 秒）：前鏡頭畫面套 color.CUBE 調色、模糊 10，上面壓一層 #313131 透明度 80%。
-   31345 ms   「文」由小到大彈出來（約 1 秒，彈到最大再略微縮小，QQ 的感覺）；
-              約 100 毫秒之後（31445 ms）「體」開始彈，32445 ms 兩個字都完整彈出來。
+   31345 ms   「文」從最終大小的 75% 彈出來（約 1.25 秒；一開始很快淡入，彈到最大再略微縮小，QQ 的感覺）；
+              約 200 毫秒之後（31545 ms）「體」開始彈，32795 ms 兩個字都完整彈出來。
               到定位之後，兩個字都在定位附近微微地隨機游移、微幅旋轉；
               眼睛和嘴巴三個符號也各自稍微游移，大小和角度有非常些微的變化。
    眼睛：      八組，一開始隨機給文和體各一組（不重複）；嘴巴固定。
    點擊文／體： 換那個字的眼睛（舊的眼睛高度迅速變成 0，新的再從 0 變回原本的大小，像眨眼；
               兩隻眼睛隨機一前一後，差一點點時間），
               同時從那幾個顏色裡隨機選兩個不重複的顏色換成新的漸層。
-   41834 ms   兩個字迅速彈回縮小消失（約半秒，42334 ms 完整消失），背景同時變成 #313131 不透明；
-              之後維持一片 #313131，到 44210 ms 換成 slit。
+   41834 ms   兩個字先略微變大，再迅速縮小到 75% 同時淡出（約半秒，42334 ms 完整消失），背景同時變成 #313131 不透明；
+              之後維持一片 #313131，到 43710 ms 換成 slit。
 
    index.html：word 用 transition: 'under' 接在 divide 後面（divide 疊在上面自己往下掉），
    全部用同一個 WebGL 畫布畫（形狀先畫成貼圖），顆粒和其他段落一樣。
@@ -26,10 +26,13 @@ const START = 29589;                     // 這一段開始（divide 的格子�
 const CAM_AT = 31024;                    // 模糊的鏡頭背景開始淡入（之前是一片 #313131）
 const CAM_FADE = 1000;                   // 鏡頭背景淡入要多久
 const WEN_AT = 31345;                    // 「文」開始彈出來
-const POP = 1250;                        // 每個字彈出來要多久（原本 1.5 秒，快 50%）
+const POP = 1250;                        // 每個字彈出來要多久
 const TI_DELAY = 200;                    // 文開始彈之後，體晚多久開始彈（毫秒）
-const TI_AT = WEN_AT + TI_DELAY;         // 「體」開始彈出來（31445；32445 兩個字都彈完）
-const POP_DAMP = 6, POP_WAVES = 3;       // 彈的樣子：彈到最大（約 1.13 倍）再略微縮小（約 0.98 倍）再回到原本大小
+const TI_AT = WEN_AT + TI_DELAY;         // 「體」開始彈出來（31545；32795 兩個字都彈完）
+const POP_FROM = 0.75;                   // 彈進場的起始大小（最終大小的幾倍；一開始很快地淡入）
+const POP_FADE = 120;                    // 一開始淡入要多久（毫秒）
+const POP_BOUNCE = 2.5, POP_WAVES = 3;   // 彈的樣子：從 0.75 彈到最大（約 1.11 倍）再略微縮小（約 0.96 倍）再回到原本大小
+const OUT_TO = 0.75;                     // 彈出場：先略微變大，再縮小到最終大小的這個倍數，同時淡出
 const GONE = 42334;                      // 兩個字完整消失
 const OUT_DUR = 500;                     // 迅速彈回縮小消失要多久
 const OUT_AT = GONE - OUT_DUR;           // 開始縮（41834）
@@ -72,16 +75,17 @@ const rnd = ([a, b]) => a + Math.random() * (b - a);
 const center = box => [box[0] + box[2] / 2, box[1] + box[3] / 2];
 const rotate = ([x, y], deg) => { const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return [x * c - y * s, x * s + y * c]; };
 
-// 彈出來：0 → 約 1.13 → 約 0.98 → 1
-const popScale = ms => {
-  if (ms <= 0) return 0;
+// 彈進場：大小 0.75 → 約 1.11 → 約 0.96 → 1；k = 大小、a = 透明度
+const popIn = ms => {
+  if (ms <= 0) return { k: POP_FROM, a: 0 };
   const u = ms / POP;
-  return u >= 1 ? 1 : 1 - Math.exp(-POP_DAMP * u) * Math.cos(POP_WAVES * Math.PI * u);
+  const k = u >= 1 ? 1 : 1 - (1 - POP_FROM) * Math.exp(-POP_BOUNCE * u) * Math.cos(POP_WAVES * Math.PI * u) * (1 - u ** 4);
+  return { k, a: smooth(clamp01(ms / POP_FADE)) };
 };
-// 退場：先略微變大再迅速縮到 0
-const outScale = ms => {
-  const u = clamp01(ms / OUT_DUR);
-  return 1 - (2.70158 * u * u * u - 1.70158 * u * u);
+// 彈出場：先略微變大（約 1.09 倍），再迅速縮到 0.75，同時淡出
+const popOut = ms => {
+  const u = clamp01(ms / OUT_DUR), c = 4;
+  return { k: 1 - (1 - OUT_TO) * ((c + 1) * u ** 3 - c * u * u), a: 1 - smooth(clamp01((u - 0.3) / 0.7)) };
 };
 // 一組緩慢、自然的隨機擺動（-1 ~ 1）
 const wobble = hz => {
@@ -100,7 +104,7 @@ const pickColors = not => {
 export default {
   name: 'word',
   needs: { camera: true },
-  dev: { from: START, to: 44210 },
+  dev: { from: START, to: 43710 },
 
   async preload(stage) {
     this.canvas = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });
@@ -152,9 +156,10 @@ export default {
   // 字現在的位置、角度、大小（每個元件頁單位是幾個 CSS px）
   pose(i, L, ms, t) {
     const c = this.chars[i], st = this.state[i];
-    const k = popScale(ms - c.popAt) * (ms >= OUT_AT ? outScale(ms - OUT_AT) : 1);
+    const pi = popIn(ms - c.popAt), po = ms >= OUT_AT ? popOut(ms - OUT_AT) : { k: 1, a: 1 };
+    const k = pi.k * po.k;
     return {
-      k,
+      k, a: pi.a * po.a,
       x: L.ox + (c.at[0] + WANDER_PX * st.wx(t)) * L.s,
       y: L.oy + (c.at[1] + WANDER_PX * st.wy(t)) * L.s,
       rot: c.rot + WANDER_DEG * st.wr(t),
@@ -179,11 +184,11 @@ export default {
 
     this.chars.forEach((c, i) => {
       const P = this.pose(i, L, ms, t), st = this.state[i];
-      if (P.k <= 0.001) return;
+      if (P.a <= 0.001) return;
       const [c1, c2] = this.colorsOf(st, now);
       const place = (off, s, rot, sx = 1, sy = 1) => {
         const [dx, dy] = rotate(off, P.rot);
-        return { s, x: P.x + dx * P.scale, y: P.y + dy * P.scale, rot: rot * Math.PI / 180, sx: P.scale * sx, sy: P.scale * sy };
+        return { s, x: P.x + dx * P.scale, y: P.y + dy * P.scale, rot: rot * Math.PI / 180, sx: P.scale * sx, sy: P.scale * sy, a: P.a };
       };
       // 外形（漸層）
       sprites.push({ ...place([0, 0], c.shapeS, P.rot), c1, c2 });
@@ -220,7 +225,7 @@ export default {
     const px = e.clientX - r.left, py = e.clientY - r.top, now = performance.now();
     for (let i = this.chars.length - 1; i >= 0; i--) {
       const c = this.chars[i], P = this.pose(i, this.L, this.ms, this.ms / 1000);
-      if (P.k < 0.6) continue;                       // 還沒彈出來
+      if (P.a < 0.5) continue;                       // 還沒出現
       const [lx, ly] = rotate([(px - P.x) / P.scale, (py - P.y) / P.scale], -P.rot);
       if (!this.hitCtx.isPointInPath(c.path, lx + c.sc[0], ly + c.sc[1])) continue;
       const st = this.state[i], ey = st.eye;
@@ -308,9 +313,10 @@ void main(){
 uniform sampler2D uTex;
 uniform vec3 uC1, uC2;
 uniform vec2 uGrad;
+uniform float uAlpha;
 varying vec2 vUV;
 void main(){
-  float a = texture2D(uTex, vUV).a;
+  float a = texture2D(uTex, vUV).a * uAlpha;
   if (a <= 0.0) discard;
   vec3 c = mix(uC1, uC2, clamp((vUV.y - uGrad.x) / uGrad.y, 0.0, 1.0));
   c = clamp(c + grain(), 0.0, 1.0);
@@ -477,6 +483,7 @@ void main(){
         gl.uniform3fv(U.uC1, sp.c1 || INK);
         gl.uniform3fv(U.uC2, sp.c2 || INK);
         gl.uniform2f(U.uGrad, s.grad[0], s.grad[1]);
+        gl.uniform1f(U.uAlpha, sp.a == null ? 1 : sp.a);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     },

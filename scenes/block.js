@@ -9,6 +9,8 @@
                 每個小方塊取樣自己位置上的鏡頭顏色，帶亂數偏移，一秒重新取樣 25 次（和 mandalaCam 一樣）。
               ・字碰到畫面邊緣會反彈；碰到中間的方塊會擊碎一些小方塊再反彈（碎片會噴開、落下、淡掉）；
                 字和字碰到也會互相反彈。反彈之後每個字還是維持自己的速度。
+   點擊畫面：  在點的位置加一個小黃字（大小、顏色和上面的字一樣），朝隨機的方向、用隨機的速度飛出去，
+              規則和其他字一樣（反彈、擊碎方塊）；每點一次加一個，依序是「每個人都是一種文體」，用完再從頭。
    背景和所有東西都加上和其他畫面一樣的顆粒。
    ========================================================================== */
 
@@ -24,6 +26,9 @@ const SPEED_PHONE = [120, 240];
 const SPIN = [40, 140];                  // 自轉速度（度/秒，方向隨機）
 const SPREAD = 70;                       // 飛出去的方向：從畫面中心往外的方向左右隨機偏多少度
 const HIT_RADIUS = 0.45;                 // 碰撞半徑（字的大小的幾倍）
+// 點擊畫面加的字（依序，用完再從頭）
+const TAP_CHARS = '每個人都是一種文體';
+const TAP_MAX = 60;                      // 點出來的字最多同時幾個（超過就把最早點出來的拿掉，免得手機跑不動）
 
 // 中間的方塊（Figma：215 × 215，畫面正中央）
 const SQUARE = 215;                      // 邊長（以 Figma 388 寬的畫面計，跟著畫面縮放）
@@ -60,11 +65,13 @@ export default {
   dev: { from: START, to: 90000 },
 
   async preload(stage) {
-    await stage.font(`${FONT_SIZE}px ${FONT}`, LINES.join(''));
+    await stage.font(`${FONT_SIZE}px ${FONT}`, LINES.join('') + TAP_CHARS);
     this.canvas = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });   // 和 slit 一樣的解析度，接起來才看不出差別
     this.gl = blockLayer(this.canvas);
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，block 不會出現');
     this.chars = LINES.map((ch, i) => ({ ch, i })).filter(c => c.ch);
+    this.glyphs = [...this.chars.map(c => c.ch), ...TAP_CHARS];   // 字的圖：上面的字，再接點擊加的字
+    stage.root.addEventListener('pointerdown', e => this.tap(stage, e));
   },
 
   enter(stage, f) {
@@ -83,14 +90,15 @@ export default {
     const size = Math.max(CELL, Math.round(SQUARE * s / CELL) * CELL);
     const n = size / CELL;
     this.L = { W, H, s, n, size, x: Math.round((W - size) / 2), y: Math.round((H - size) / 2), font: FONT_SIZE * s, lh: LINE_HEIGHT * s };
-    if (this.gl) this.gl.setGlyphs(this.chars.map(c => c.ch), this.L.font, this.canvas.width / W);
+    if (this.gl) this.gl.setGlyphs(this.glyphs, this.L.font, this.canvas.width / W);
     return this.L;
   },
 
   // 回到一開始的樣子：字在 slit 最後的位置、方塊還沒出現
   reset(stage) {
     const L = this.layout(stage), n = LINES.length;
-    this.bodies = this.chars.map(c => {
+    this.tapN = 0;                           // 點擊加了幾個字（決定下一個是哪個字）
+    this.bodies = this.chars.map((c, g) => {
       const x = L.W / 2, y = L.H / 2 + (c.i - (n - 1) / 2) * L.lh;
       // 從畫面中心往外的方向（直排在中線上，所以是往上或往下），再左右隨機偏一點
       const out = y < L.H / 2 ? -Math.PI / 2 : Math.PI / 2;
@@ -100,6 +108,7 @@ export default {
         x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, speed: sp,
         rot: 0, spin: (Math.random() < 0.5 ? -1 : 1) * rnd(SPIN) * Math.PI / 180,
         r: L.font * HIT_RADIUS, ghost: true,     // ghost：還在方塊範圍裡，先不和方塊碰撞
+        g,                                       // 用字的圖裡的第幾個字
       };
     });
     // 小方塊：每一格什麼時候淡入、還在不在
@@ -126,6 +135,22 @@ export default {
 
     const v = stage.camera;
     this.gl.draw(v && v.videoWidth > 0 ? v : null, L, this.simT * 1000, this.cellMs(), this.bodies, this.debris);
+  },
+
+  // 點擊畫面：在點的位置加一個字，朝隨機的方向、用隨機的速度飛出去（點在方塊上就直接從裡面打出來）
+  tap(stage, e) {
+    if (!this.bodies || !this.L || this.lastMs < START) return;
+    const L = this.L, rect = stage.root.getBoundingClientRect(), r = L.font * HIT_RADIUS;
+    const x = Math.max(r, Math.min(L.W - r, e.clientX - rect.left)), y = Math.max(r, Math.min(L.H - r, e.clientY - rect.top));
+    const a = Math.random() * Math.PI * 2, sp = rnd(isPhone() ? SPEED_PHONE : SPEED_DESKTOP);
+    this.bodies.push({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, speed: sp,
+      rot: 0, spin: (Math.random() < 0.5 ? -1 : 1) * rnd(SPIN) * Math.PI / 180,
+      r, ghost: false, g: this.chars.length + (this.tapN % TAP_CHARS.length), tapped: true,
+    });
+    this.tapN++;
+    const tapped = this.bodies.filter(b => b.tapped);
+    if (tapped.length > TAP_MAX) this.bodies.splice(this.bodies.indexOf(tapped[0]), 1);
   },
 
   // 方塊長出來之後過了幾毫秒（還沒開始就是負的）
@@ -504,7 +529,7 @@ void main(){
       bodies.forEach((b, i) => {
         gl.uniform2f(U.uC, b.x * d, b.y * d);
         gl.uniform2f(U.uRot, Math.cos(b.rot), Math.sin(b.rot));
-        gl.uniform1f(U.uIdx, i);
+        gl.uniform1f(U.uIdx, b.g == null ? i : b.g);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       });
     },
