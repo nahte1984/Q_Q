@@ -2,6 +2,7 @@
    rain — 符號雨
    --------------------------------------------------------------------------
    0 ms        按下 PLAY，介面淡出、背景的色彩交融留著，開始下白色的符號雨
+   4764 ms     畫面中間出現提示可以點擊的按鈕（Figma click），淡入 1 秒；觀眾點了螢幕任一處之後 1 秒淡出
    8389 ms     第 4 小節第 1 拍：前鏡頭畫面開始淡入（套 color.CUBE 調色、壓 40% 黑、加細顆粒），2 小節後完全出現；
                之後落下的符號有顏色（Figma 那五個顏色用隨機的順序循環、慢慢漸變），碰到頭會彈開
    15000 ms    「每個人都是一種文體」拆成一個一個白色的字，打散混在符號裡落下
@@ -26,6 +27,18 @@ const CHAR_SIZE_MIN = 40, CHAR_SIZE_MAX = 50;   // 句子拆開後每個字的�
 const CHAR_COLOR = '#fff';                       // 句子的字一律白色
 const CHAR_SPREAD = 260;                 // 每個字出發時上下錯開的距離（px），讓它們不會排成一排
 const CHAR_FALL = 1.25;                  // 句子的字比符號平均落得快多少（1.25 = 快 25%）
+// 提示可以點擊（Figma click）
+const HINT_AT = 4764;                    // 出現的時間（毫秒）
+const HINT_IN = 1000;                    // 淡入多久（毫秒）
+const HINT_OUT = 1000;                   // 點擊之後淡出多久（毫秒）
+const HINT_TEXT = 'Click Anywhere';
+const HINT_ICON = new URL('../images/click.svg', import.meta.url).href;
+const HINT_CSS = `
+.rn-hint{position:absolute;left:50%;top:50%;width:165px;height:29px;margin:-14.5px 0 0 -82.5px;transform:scale(var(--s,1));border-radius:50px;background:#748180;opacity:0;pointer-events:none}
+.rn-hint img{position:absolute;left:14px;top:5px;width:15px;height:19px;display:block}
+.rn-hint span{position:absolute;left:95px;top:4px;transform:translateX(-50%);font:15px/21.048px "Roboto Slab",Georgia,serif;color:rgba(255,255,255,.9);white-space:nowrap}
+`;
+
 const PHRASES = [
   { at: 15000, text: '每個人都是一種文體' },
   { at: 18000, text: '你覺得你是哪一種' },
@@ -102,7 +115,7 @@ const colorRow = ms => {
 export default {
   name: 'rain',
   needs: { camera: true },
-  dev: { from: 0, to: 29800 },
+  dev: { from: 0, to: 22041 },
 
   async preload(stage) {
     const root = stage.root;
@@ -149,7 +162,21 @@ export default {
     root.addEventListener('pointerdown', e => {
       const r = root.getBoundingClientRect();
       this.taps.push({ x: e.clientX - r.left, y: e.clientY - r.top });
+      // 提示出現之後第一次點擊：提示開始淡出
+      if (this.hintTap == null && this.lastMs >= HINT_AT) this.hintTap = this.lastMs;
     });
+
+    // 7. 提示可以點擊（蓋在最上面，不擋點擊）
+    if (!document.getElementById('rn-hint-css')) {
+      const st = document.createElement('style'); st.id = 'rn-hint-css'; st.textContent = HINT_CSS; document.head.appendChild(st);
+    }
+    this.hint = document.createElement('div');
+    this.hint.className = 'rn-hint';
+    this.hint.innerHTML = `<img alt="" src="${HINT_ICON}"><span>${HINT_TEXT}</span>`;
+    root.appendChild(this.hint);
+    this.hintA = -1;
+    this.hintTap = null;
+    await Promise.all([this.hint.querySelector('img').decode().catch(() => {}), stage.font('15px "Roboto Slab"', HINT_TEXT)]);
   },
 
   enter(stage, f) {
@@ -158,6 +185,7 @@ export default {
     this.acc = 0;
     this.lastMs = f.t * 1000;
     this.done = PHRASES.map(p => this.lastMs > p.at + 300);   // 從中途進場時，已經過了的句子就不補
+    this.hintTap = null;
   },
 
   exit() {
@@ -166,6 +194,16 @@ export default {
     this.faces = [];
     this.camCanvas.style.opacity = 0;
     this.lastCamA = -1;
+    this.showHint(0);
+  },
+
+  // 提示的透明度和大小（大小跟著畫面縮放，和載入畫面一樣）
+  showHint(a, W, H) {
+    if (a !== this.hintA) { this.hintA = a; this.hint.style.opacity = a.toFixed(3); }
+    if (a > 0) {
+      const s = Math.max(0.82, Math.min(1.45, Math.min(W / 388, H / 743)));
+      if (s !== this.hintS) { this.hintS = s; this.hint.style.setProperty('--s', s.toFixed(4)); }
+    }
   },
 
   update(stage, f) {
@@ -176,6 +214,12 @@ export default {
     // 往回跳（開發時）：句子可以再出現一次
     if (ms < this.lastMs - 500) this.done = PHRASES.map(p => ms > p.at + 300);
     this.lastMs = ms;
+
+    // 提示可以點擊：照音樂時間淡入；點擊之後從當時的透明度淡出
+    if (this.hintTap != null && ms < this.hintTap) this.hintTap = null;   // 往回跳到點擊之前（開發時）：提示再出現
+    let hintA = clamp01((ms - HINT_AT) / HINT_IN);
+    if (this.hintTap != null) hintA = clamp01((this.hintTap - HINT_AT) / HINT_IN) * (1 - clamp01((ms - this.hintTap) / HINT_OUT));
+    this.showHint(hintA, W, H);
 
     // 鏡頭淡入（共用的相機，點擊開始時已經開好）
     const video = stage.camera;

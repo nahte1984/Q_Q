@@ -1,15 +1,14 @@
 /* ==========================================================================
    slit — 造型磁頭的 slit-scan
    --------------------------------------------------------------------------
-   參考 nahte1984.github.io/oooslit：一個「磁頭」從畫面中心往外擴張，
-   磁頭經過的地方會留下當下那一刻的鏡頭畫面，所以越外圈是越晚的畫面。
+   參考 nahte1984.github.io/oooslit：「磁頭」掃過畫面，
+   磁頭經過的地方會留下當下那一刻的鏡頭畫面，所以越晚掃到的地方是越晚的畫面。
 
-   三輪，每一輪的磁頭形狀不同；磁頭在畫面中心時最小，一直長大到整個形狀都在畫面外，就是一輪。
-   前一輪留下的畫面不會清掉，下一輪從中心開始一圈一圈蓋過去。
-     第一輪  圓形    44210 – 50478 ms
-     第二輪  星星    50479 – 57194 ms（images/slit-star.svg）
-     第三輪  愛心    57195 – 64481 ms（images/slit-heart.svg）
-   背景色 #313131（第一輪還沒掃到的地方）。
+   三輪，每一輪的磁頭不同；前一輪留下的畫面不會清掉，下一輪直接蓋過去。
+     第一輪  44210 – 50478 ms  圓形：從畫面中心由最小長大到整個圓都在畫面外
+     第二輪  50479 – 57194 ms  四條線：畫面中心到四個角的四條線，同時往逆時針方向扇形掃過自己那一塊（Figma 30-75）
+     第三輪  57195 – 64481 ms  九條線：畫面長寬各切成三等份，每一格一條直線，上下兩排往右、中間一排往左（Figma 30-130）
+   每一輪的磁頭同時開始、同時結束。背景色 #313131（第一輪還沒掃到的地方）。
    鏡頭畫面套 lut/color.CUBE 的調色（和 rain 一樣，設定在 lut.js）。
 
    64482 – 69260 ms  圓形像遮罩一樣從畫面中心由最小長到填滿畫面，
@@ -17,13 +16,13 @@
    68105 ms   背景上直排的「看故事謎底玩解讀遊戲」淡入（Figma Page 1）。
 
    小圖案：每一輪掃描時，畫面上隨機的位置一秒冒出 6 個小圖案，顏色從五個顏色裡隨機挑，出現了就一直留著。
-     第一輪冒出小圓點，第二輪冒出小星星，第三輪冒出小愛心（形狀和磁頭一樣）。
+     第一輪 images/slit01.svg，第二輪 images/slit02.svg，第三輪 images/slit03.svg。
    大小照 _references/slitSymbol.png；落點可以到畫面邊緣（最多只看得到一半的形狀）。
    點擊畫面：點的地方附近很快地一個接一個累積一堆小圖案（形狀跟著當下那一輪，顏色隨機），一樣一直留著。
 
    和 oooslit 的差別：
    ・全部用 WebGL 在顯示卡上畫（oooslit 每一幀都用 2D canvas 剪一個圓環再貼整張鏡頭畫面）
-   ・每一幀只處理磁頭這一幀掃過的那一圈，而且只算磁頭外框以內的範圍
+   ・每一幀只寫入磁頭這一幀掃過的地方（圓形的那一輪只算磁頭外框以內的範圍）
    ・用手機原本的解析度（oooslit 是 1 倍，Retina 螢幕上會糊）
    ・跟著音樂時間走：暫停時畫面停住，掉幀也不會有縫
    ========================================================================== */
@@ -31,12 +30,15 @@
 import { LUT_FILE, parseCube, LUT_GLSL, uploadLut } from './lut.js';
 
 /* ---------- 可以調整的數字 ---------- */
-// 三輪的磁頭：shape 是 'circle' 或 SVG 檔（相對於這個檔；用檔案裡第一個 path 的外框）
+// 三輪：head 是磁頭，dots 是這一輪冒出來的小圖案（SVG 檔，相對於這個檔）
+//   head：'circle'（圓形從中心長大）、SVG 檔（那個形狀從中心長大，用檔案裡第一個 path 的外框）、
+//         'sweep'（中心到四個角的四條線，逆時針掃）、'grid'（九宮格，每格一條直線，上下兩排往右、中間往左）
 const ROUNDS = [
-  { shape: 'circle', from: 44210, to: 50478 },
-  { shape: '../images/slit-star.svg', from: 50479, to: 57194 },
-  { shape: '../images/slit-heart.svg', from: 57195, to: 64481 },
+  { head: 'circle', dots: '../images/slit01.svg', from: 44210, to: 50478 },
+  { head: 'sweep', dots: '../images/slit02.svg', from: 50479, to: 57194 },
+  { head: 'grid', dots: '../images/slit03.svg', from: 57195, to: 64481 },
 ];
+const MODE = { sweep: 1, grid: 2 };      // 其他（圓形、SVG）都是 0：從中心長大
 const BG_COLOR = '#313131';
 const CAMERA_LUT = LUT_FILE;             // 鏡頭的調色；不要調色就改成 null
 // 顆粒（和 rain、divide 一樣；不要顆粒就把 GRAIN_AMOUNT 改成 0）
@@ -58,7 +60,7 @@ const REVEAL = {
 
 // 小圖案
 const SHAPE_COLORS = ['#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3'];   // Figma Page 1 左邊那五個
-const SHAPE_SIZE = [19, 25, 24];         // 每一輪小圖案的寬度（px）：圓點直徑、星星、愛心（照 slitSymbol.png）
+const SHAPE_SIZE = [19, 25, 24];         // 每一輪小圖案的大小（px，長邊）
 const SHAPES_PER_SEC = 6;                // 一秒冒出幾個
 // 點擊畫面：點的地方附近很快地累積一堆小圖案
 const TAP_SHAPES = 14;                   // 點一下冒出幾個
@@ -77,15 +79,17 @@ export default {
   dev: { from: 44210, to: 70552 },
 
   async preload(stage) {
-    // 每一輪的形狀算成「角度 → 外框半徑」的表（最遠的一點 = 1）
-    const [radial, lut] = await Promise.all([
-      Promise.all(ROUNDS.map(async r => (r.shape === 'circle' ? { R: new Float32Array(BINS).fill(1), poly: null } : radialFromSVG(await stage.file(r.shape))))),
+    // 從中心長大的磁頭：形狀算成「角度 → 外框半徑」的表（最遠的一點 = 1）；四條線、九宮格不用
+    this.modes = ROUNDS.map(r => MODE[r.head] || 0);
+    const [radial, dots, lut] = await Promise.all([
+      Promise.all(ROUNDS.map(async (r, i) => (this.modes[i] || r.head === 'circle' ? new Float32Array(BINS).fill(1) : radialFromSVG(await stage.file(r.head)).R))),
+      Promise.all(ROUNDS.map(async r => pathFromSVG(await stage.file(r.dots)))),
       CAMERA_LUT ? stage.file(CAMERA_LUT).then(parseCube).catch(err => { console.warn('調色檔沒有套用：', err); return null; }) : null,
     ]);
-    this.radial = radial.map(r => r.R);
-    this.polys = radial.map(r => r.poly);
+    this.radial = radial;
+    this.dotShapes = dots;
     this.canvas = stage.canvas({ dpr: Math.min(MAX_DPR, window.devicePixelRatio || 1) });
-    this.gl = slitLayer(this.canvas, this.radial);
+    this.gl = slitLayer(this.canvas, this.radial, this.modes);
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，slit 不會出現');
     else if (lut) this.gl.setLut(lut);
     // 小圖案畫在上面一層透明的畫布：冒出來時畫一次就好，之後不用重畫
@@ -129,13 +133,12 @@ export default {
     this.dctx.clearRect(0, 0, this.dots.width, this.dots.height);
   },
   drawShape(sh, W, H) {
-    const g = this.dctx, d = this.dots.width / W, poly = this.polys[sh.type], w = SHAPE_SIZE[sh.type];
-    g.setTransform(d, 0, 0, d, sh.x * W * d, sh.y * H * d);
+    const g = this.dctx, d = this.dots.width / W, S = this.dotShapes[sh.type];
+    const k = SHAPE_SIZE[sh.type] / Math.max(S.w, S.h);          // 長邊 = SHAPE_SIZE
+    g.setTransform(d * k, 0, 0, d * k, sh.x * W * d, sh.y * H * d);
+    g.translate(-S.x - S.w / 2, -S.y - S.h / 2);                  // 以形狀中心為原點
     g.fillStyle = sh.color;
-    g.beginPath();
-    if (!poly) g.arc(0, 0, w / 2, 0, Math.PI * 2);
-    else { for (let k = 0; k < poly.length; k += 2) g.lineTo(poly[k] * w, poly[k + 1] * w); g.closePath(); }
-    g.fill();
+    g.fill(S.path);
   },
   // 跟著音樂時間冒出小圖案（一秒 SHAPES_PER_SEC 個）；拖回前面就清掉重來
   updateShapes(stage, ms) {
@@ -181,8 +184,9 @@ export default {
     this.bursts.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, type, at: this.shapesMs, n: 0 });
   },
 
-  // 磁頭要長到多大，整個形狀才會完全在畫面外
+  // 一輪的終點：從中心長大的磁頭 = 要長到多大（CSS px）整個形狀才會完全在畫面外；四條線、九宮格 = 1（掃完）
   kMax(stage, i) {
+    if (this.modes[i]) return 1.0001;
     if (!this.kmax[i]) this.kmax[i] = reach(stage, this.radial[i], stage.width / 2, stage.height / 2);
     return this.kmax[i];
   },
@@ -294,6 +298,17 @@ function radialFromSVG(buf) {
   const step = 4, poly = new Float32Array(Math.ceil(n / step) * 2), wd = maxX - minX || 1;
   for (let k = 0, j = 0; k < n; k += step, j += 2) { poly[j] = pts[2 * k] / wd; poly[j + 1] = pts[2 * k + 1] / wd; }
   return { R, poly };
+}
+
+// SVG → 小圖案（整個檔案裡所有的 path，照 viewBox 的大小）
+function pathFromSVG(buf) {
+  const doc = new DOMParser().parseFromString(new TextDecoder().decode(buf), 'image/svg+xml');
+  const svg = doc.querySelector('svg');
+  const ds = [...doc.querySelectorAll('path')].map(e => e.getAttribute('d')).filter(Boolean);
+  if (!svg || !ds.length) throw new Error('SVG 裡找不到 path');
+  const vb = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+  const [x, y, w, h] = vb.length === 4 && vb.every(Number.isFinite) ? vb : [0, 0, +svg.getAttribute('width') || 100, +svg.getAttribute('height') || 100];
+  return { path: new Path2D(ds.join(' ')), x, y, w, h };
 }
 
 /* ---------- 最後的背景：遮罩（圓形）裡露出 #313131 和直排的字，加顆粒 ---------- */
@@ -412,7 +427,7 @@ void main(){
 }
 
 /* ---------- WebGL ---------- */
-function slitLayer(canvas, radial) {
+function slitLayer(canvas, radial, modes) {
   const gl = canvas.getContext('webgl', { antialias: false, alpha: false, depth: false, stencil: false, preserveDrawingBuffer: false });
   if (!gl) return null;
   const vs = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
@@ -423,12 +438,13 @@ precision highp float;
 precision mediump float;
 #endif
 `;
-  // 1. 掃描：磁頭這一幀掃過的那一圈（last ≤ 大小 < cur）寫進當下的鏡頭畫面，其他地方不動
+  // 1. 掃描：磁頭這一幀掃過的地方（last ≤ 磁頭經過的時間點 < cur）寫進當下的鏡頭畫面，其他地方不動
   const scanFS = head + `
 uniform sampler2D uCam, uShape;
 uniform vec2 uRes, uCamScale;
-uniform float uD, uRow, uRows, uLast, uCur, uUseLut;
+uniform float uD, uRow, uRows, uLast, uCur, uUseLut, uMode;
 uniform vec2 uCenter;                    // 磁頭的中心（裝置像素）
+uniform vec2 uHalf;                      // 畫面一半的寬、高（CSS px）
 ${LUT_GLSL}
 const float BINS = ${BINS}.0;
 float decode(float i){
@@ -440,9 +456,28 @@ float radiusAt(float a){
   float i = floor(u);
   return mix(decode(i), decode(i + 1.0), u - i);
 }
+const float PI = 3.14159265, TAU = 6.2831853;
+// 磁頭什麼時候經過這裡：從中心長大 = 長到多大（CSS px）；四條線、九宮格 = 這一輪的進度（0–1）
+float phase(vec2 p){
+  if (uMode < 0.5) return length(p) / radiusAt(atan(p.y, p.x));
+  if (uMode < 1.5) {
+    // 四條線：中心到四個角；每條線逆時針掃到下一條線原本的位置（四塊扇形同時開始同時結束）
+    float a = mod(atan(-p.y, p.x), TAU);                           // 往上為正的角度：0 = 右、PI/2 = 上
+    float d = atan(uHalf.y, uHalf.x);                              // 右上角那條線的角度
+    if (a < d) a += TAU;                                           // 右邊那塊跨過 0 度
+    if (a < PI - d) return (a - d) / (PI - 2.0 * d);               // 上：右上 → 左上
+    if (a < PI + d) return (a - PI + d) / (2.0 * d);               // 左：左上 → 左下
+    if (a < TAU - d) return (a - PI - d) / (PI - 2.0 * d);         // 下：左下 → 右下
+    return (a - TAU + d) / (2.0 * d);                              // 右：右下 → 右上
+  }
+  // 九宮格：每一格一條直線，上下兩排往右、中間一排往左
+  vec2 q = clamp((p + uHalf) / (2.0 * uHalf) * 3.0, 0.0, 2.9999);
+  float u = fract(q.x);
+  return floor(q.y) == 1.0 ? 1.0 - u : u;
+}
 void main(){
-  vec2 p = (gl_FragCoord.xy - uCenter) / uD;  p.y = -p.y;         // 以磁頭中心為原點（CSS px，往下為正）
-  float s = length(p) / radiusAt(atan(p.y, p.x));                 // 磁頭要長到多大才會經過這裡
+  vec2 p = (gl_FragCoord.xy - uCenter) / uD;  p.y = -p.y;         // 以畫面中心為原點（CSS px，往下為正）
+  float s = phase(p);
   if (s < uLast || s >= uCur) discard;
   vec2 t = (vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uRes - 0.5) * uCamScale + 0.5;   // 像 cover 一樣鋪滿
   t.x = 1.0 - t.x;                                                 // 前鏡頭左右鏡像
@@ -586,13 +621,16 @@ void main(){
       const px = (cx ?? stage.width / 2) * d, py = h - (cy ?? stage.height / 2) * d;   // 中心（裝置像素，往上為正）
       gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.viewport(0, 0, w, h);
-      // 只算磁頭外框以內的方塊（形狀最遠的一點 = cur）
-      const half = Math.ceil(cur * d) + 2;
-      const x0 = Math.max(0, Math.floor(px - half)), y0 = Math.max(0, Math.floor(py - half));
-      const x1 = Math.min(w, Math.ceil(px + half)), y1 = Math.min(h, Math.ceil(py + half));
-      if (x1 <= x0 || y1 <= y0) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); return; }
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(x0, y0, x1 - x0, y1 - y0);
+      // 從中心長大的磁頭：只算外框以內的方塊（形狀最遠的一點 = cur）；四條線、九宮格整個畫面都要算
+      const mode = modes[round] || 0;
+      if (!mode) {
+        const half = Math.ceil(cur * d) + 2;
+        const x0 = Math.max(0, Math.floor(px - half)), y0 = Math.max(0, Math.floor(py - half));
+        const x1 = Math.min(w, Math.ceil(px + half)), y1 = Math.min(h, Math.ceil(py + half));
+        if (x1 <= x0 || y1 <= y0) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); return; }
+        gl.enable(gl.SCISSOR_TEST);
+        gl.scissor(x0, y0, x1 - x0, y1 - y0);
+      }
       gl.useProgram(scan.p);
       const U = scan.U;
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, shapeTex);
@@ -603,6 +641,8 @@ void main(){
       gl.uniform1f(U.uRow, round); gl.uniform1f(U.uRows, rows);
       gl.uniform1f(U.uLast, last); gl.uniform1f(U.uCur, cur);
       gl.uniform2f(U.uCenter, px, py);
+      gl.uniform1f(U.uMode, mode);
+      gl.uniform2f(U.uHalf, stage.width / 2, stage.height / 2);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.disable(gl.SCISSOR_TEST);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);

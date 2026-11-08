@@ -20,7 +20,7 @@ const SPEED = 1;
 // 封面（相對於這個檔）
 const COVER = '../images/cover.webp';
 // 進度線下面那行字
-const CAPTION = 'Interactive Experience (BETA)';
+const CAPTION = 'Interactive Experience (Private Beta)';
 // 標題「每個人都是一種文體」：卡片出現時，九個字用隨機的順序一個一個快速淡入；
 // 之後每 TITLE_REPEAT 毫秒重來一次（每次順序都重新隨機），每個字輪到時先消失再淡入
 const TITLE_LINES = ['每個人', '都是', '一種文體'];
@@ -42,7 +42,7 @@ const CSS = `
 .ld-artist{position:absolute;right:0;top:259px;width:19px;font:19px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#748180;text-align:center}
 .ld-line{position:absolute;left:0;top:402px;width:235px;height:1px;background:#fff}
 .ld-line i{position:absolute;left:0;top:0;height:100%;width:0;background:#748180}
-.ld-cap{position:absolute;left:0;top:426px;width:235px;text-align:center;font:15px/21.048px "Roboto Slab",Georgia,serif;color:#748180;white-space:nowrap;transition:opacity .3s ease}
+.ld-cap{position:absolute;left:50%;top:426px;transform:translateX(-50%);text-align:center;font:15px/21.048px "Roboto Slab",Georgia,serif;color:#748180;white-space:nowrap;transition:opacity .3s ease}
 .ld-warn{position:absolute;left:0;top:426px;width:235px;text-align:center;font:17px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#bd4444;white-space:nowrap;opacity:0;transition:opacity .3s ease}
 .ld.denied .ld-cap{opacity:0}
 .ld.denied .ld-warn{opacity:1}

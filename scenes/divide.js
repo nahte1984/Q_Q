@@ -1,9 +1,10 @@
 /* ==========================================================================
    divide — 九宮格鏡頭，九種 grainrad 效果拼成一個完整的畫面
    --------------------------------------------------------------------------
-   29800 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
+   22041 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
               點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）。
-   42040 ms   九格隨機錯落地往下掉（各自帶一點自轉和左右偏移），最慢的那一格在 44210 ms 完全掉出畫面（接著 slit 開始）。
+   29589 ms   九格隨機錯落地往下掉（各自帶一點自轉和左右偏移），最慢的那一格在 31759 ms 完全掉出畫面；
+              背景色同時消失，露出下面已經開始的 word（index.html 用 transition: 'under'）。
               前鏡頭畫面鋪滿整個九宮格（像 object-fit: cover），每一格只露出自己那一塊，
               再各自套一種 grainrad 的效果；九格拼起來就是原本完整的鏡頭畫面（格子之間的縫會蓋掉一點）。
    版面：      格子和格子、格子和瀏覽器邊界都距離 5px，九宮格放到最大，直到碰到畫面的寬或高；
@@ -35,8 +36,9 @@ const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫�
                                          // false：只有效果換位子，畫面還是完整的
 
 /* ---------- 退場：九格隨機錯落地掉到畫面下方（像重力一樣越掉越快） ---------- */
-const OUTRO_FROM = 42040;                // 開始掉（毫秒，歌曲時間）
-const OUTRO_TO = 44210;                  // 最慢的那一格完全掉出畫面（slit 從這裡開始）
+const OUTRO_FROM = 29589;                // 開始掉（毫秒，歌曲時間；index.html 裡 word 那一行的 at）
+const OUTRO_TO = 31759;                  // 最慢的那一格完全掉出畫面（index.html 裡 word 那一行的 dur = 這兩個數字的差）
+const BG_OUT = 500;                      // 開始掉之後，格子外面的背景色多久消失（露出下面的 word）
 const OUTRO_SPREAD = 0.45;               // 九格開始掉的時間隨機錯開多少（佔整段時間的比例；0 = 一起掉）
 // 每一格掉的時候隨機帶一點自轉和左右偏移（同一格往哪邊轉就往哪邊偏，像失去平衡倒下去）
 const FALL_SPIN = [4, 18];               // 一開始的自轉速度（度/秒，隨機在這個範圍內）
@@ -86,7 +88,7 @@ const HOME = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 export default {
   name: 'divide',
   needs: { camera: true },
-  dev: { from: 29800, to: 44210 },
+  dev: { from: 22041, to: 31759 },
 
   async preload(stage) {
     this.canvas = stage.canvas({ dpr: Math.min(3, window.devicePixelRatio || 1) });
@@ -172,7 +174,8 @@ export default {
       });
     }
     const v = stage.camera;
-    this.gl.draw(v && v.videoWidth > 0 ? v : null, L, f ? f.t : 0, cards, clamp01(t / INTRO));
+    const bgA = clamp01(t / INTRO) * (1 - smooth(clamp01((ms - OUTRO_FROM) / BG_OUT)));   // 進場時蓋過上一段；開始掉的時候消失
+    this.gl.draw(v && v.videoWidth > 0 ? v : null, L, f ? f.t : 0, cards, bgA);
   },
 };
 
