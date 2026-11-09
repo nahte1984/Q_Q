@@ -2,7 +2,8 @@
    divide — 九宮格鏡頭，九種 grainrad 效果拼成一個完整的畫面
    --------------------------------------------------------------------------
    22041 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
-              點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）；進場淡入還沒結束時點了不算。
+              點畫面：九個格子隨機換位子，新的排列直接疊在舊的上面迅速淡入（不移動，中間不會閃出底色）；
+              進場淡入還沒結束時點了不算。
    30089 ms   九格用隨機的順序錯落地淡出，最後一格在 32259 ms 完全消失，
               露出下面已經開始的 word（index.html 用 transition: 'under'）。
               前鏡頭畫面鋪滿整個畫面（像 object-fit: cover），每一格只露出自己那一塊，
@@ -26,7 +27,7 @@ const INTRO = 1300;                      // 整個進場（毫秒）
 const CARD_FADE = 500;                   // 每一格淡入花多久（毫秒）；九格的開始時間平均分散在剩下的時間裡
 
 /* ---------- 點畫面：九個格子隨機換位子 ---------- */
-const TAP_FADE = 200;                    // 每一格重新淡入花多久（毫秒）
+const TAP_FADE = 200;                    // 每一格的新效果疊在舊的上面淡入，花多久（毫秒）
 const TAP_SPREAD = 200;                  // 九格的淡入開始時間在這段時間裡隨機錯開（毫秒；0 = 九格一起淡入）
 const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
                                          // false：只有效果換位子，畫面還是完整的
@@ -97,9 +98,9 @@ export default {
 
   reset() {
     this.order = shuffled(HOME);          // 淡入的順序
-    this.slot = HOME.slice();             // 第 c 格（第 c 種效果）現在在哪個位置
-    this.tapOrder = HOME.slice();         // 換位子後重新淡入的順序
-    this.tapAt = -Infinity;
+    // 排列：slot[c] = 第 c 種效果在哪個位置；order = 換位子時九格淡入的順序；at = 什麼時候換的
+    // 換位子時新的排列疊在最上面淡入，下面的排列一直保持不透明，等上面的完全淡入才拿掉，所以不會閃出底色
+    this.layers = [{ slot: HOME.slice(), order: HOME.slice(), at: -Infinity }];
     // 退場：每一格什麼時候開始淡出（毫秒，歌曲時間）；順序隨機，間隔也不規則；
     // 第一格在 OUTRO_FROM 開始，最後一格剛好在 OUTRO_TO 淡完
     const rank = shuffled(HOME), span = OUTRO_TO - OUTRO_FROM - OUTRO_FADE;
@@ -115,13 +116,12 @@ export default {
   enter() { this.active = true; this.reset(); },
   exit() { this.active = false; },
 
-  // 換位子：每一格都直接跳到別的位置，再迅速重新淡入（淡入中再點也可以）
+  // 換位子：每一格都換到別的位置，新的排列疊在現在的上面迅速淡入（淡入中再點也可以）
   shuffle() {
+    const top = this.layers[this.layers.length - 1].slot;
     let next;
-    do next = shuffled(HOME); while (next.some((s, c) => s === this.slot[c]));
-    this.slot = next;
-    this.tapOrder = shuffled(HOME);
-    this.tapAt = performance.now();
+    do next = shuffled(HOME); while (next.some((s, c) => s === top[c]));
+    this.layers.push({ slot: next, order: shuffled(HOME), at: performance.now() });
   },
 
   // 九宮格就是整個畫面
@@ -134,19 +134,25 @@ export default {
     const L = this.layout(stage);
     const t = (this.local = f ? f.local * 1000 : INTRO);   // 進場進度（毫秒，照音樂時間）
     const ms = (this.ms = f ? f.t * 1000 : 0);
-    const sinceTap = performance.now() - this.tapAt;
+    const now = performance.now();
+    // 最上面那層已經完全淡入的話，下面的就看不到了，拿掉
+    for (let i = this.layers.length - 1; i > 0; i--) {
+      if (now - this.layers[i].at >= TAP_SPREAD + TAP_FADE) { this.layers.splice(0, i); break; }
+    }
     const cards = [];
-    for (let c = 0; c < 9; c++) {
-      const start = this.order.indexOf(c) * (INTRO - CARD_FADE) / 8;
-      const tapStart = this.tapOrder.indexOf(c) * TAP_SPREAD / 8;
-      const out = 1 - smooth(clamp01((ms - this.fadeAt[c]) / OUTRO_FADE));   // 退場淡出
-      const a = smooth(clamp01((t - start) / CARD_FADE)) * smooth(clamp01((sinceTap - tapStart) / TAP_FADE)) * out;
-      if (a <= 0) continue;
-      cards.push({
-        fx: c, a,
-        at: this.slot[c],                                  // 畫在第幾格
-        src: SHUFFLE_CARRIES_IMAGE ? c : this.slot[c],     // 畫面從第幾格取
-      });
+    for (const ly of this.layers) {                        // 由下往上畫
+      for (let c = 0; c < 9; c++) {
+        const start = this.order.indexOf(c) * (INTRO - CARD_FADE) / 8;
+        const tapStart = ly.order.indexOf(c) * TAP_SPREAD / 8;
+        const out = 1 - smooth(clamp01((ms - this.fadeAt[c]) / OUTRO_FADE));   // 退場淡出
+        const a = smooth(clamp01((t - start) / CARD_FADE)) * smooth(clamp01((now - ly.at - tapStart) / TAP_FADE)) * out;
+        if (a <= 0) continue;
+        cards.push({
+          fx: c, a,
+          at: ly.slot[c],                                  // 畫在第幾格
+          src: SHUFFLE_CARRIES_IMAGE ? c : ly.slot[c],     // 畫面從第幾格取
+        });
+      }
     }
     const v = stage.camera;
     const bgA = clamp01(t / INTRO) * (1 - smooth(clamp01((ms - OUTRO_FROM) / BG_OUT)));   // 進場時蓋過上一段；開始淡出的時候消失
