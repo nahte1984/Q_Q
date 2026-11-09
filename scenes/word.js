@@ -3,6 +3,8 @@
    --------------------------------------------------------------------------
    30089 ms   divide 的九格開始錯落淡出，露出下面這一段（一片 #313131，加細顆粒）。
    31024 ms   模糊的鏡頭背景淡入（1 秒）：前鏡頭畫面套 color.CUBE 調色、模糊 10，上面壓一層 #313131 透明度 80%。
+              文和體的範圍裡也同時淡入鏡頭畫面（Figma wenTi V2）：不模糊、轉成灰階，用柔光（soft light）疊在漸層上，
+              位置和背景的鏡頭畫面對齊，像是從字裡面看出去。
    31345 ms   「文」從最終大小的 75% 彈出來（約 1.25 秒；一開始很快淡入，彈到最大再略微縮小，QQ 的感覺）；
               約 200 毫秒之後（31545 ms）「體」開始彈，32795 ms 兩個字都完整彈出來。
               到定位之後，兩個字都在定位附近微微地隨機游移、微幅旋轉；
@@ -50,6 +52,7 @@ const PART_SPIN = 3;                     // 眼睛、嘴巴比較輕：自轉是
 const BG_COLOR = '#313131';
 const BG_ALPHA = 0.8;                    // 鏡頭淡入之後，壓在上面的 #313131 透明度（淡入之前和退場之後都是 1）
 const BLUR = 10;                         // 鏡頭的模糊程度（Figma 的數字；CSS 的 blur 是它的一半）
+const CHAR_CAM = 1;                      // 字裡面的鏡頭（灰階、不模糊、柔光疊在漸層上）有多明顯：0 = 只有漸層，1 = 完整的柔光
 
 /* ---------- 字（Figma wenTi，388 × 743 的畫面） ---------- */
 const COLORS = ['#d2d6d3', '#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3', '#ff8f8f'];   // 點擊時從這裡選兩個做漸層
@@ -233,8 +236,8 @@ export default {
         const [dx, dy] = rotate(off, P.rot);
         return { s, x: P.x + dx * P.scale, y: P.y + dy * P.scale, rot: rot * Math.PI / 180, sx: P.scale * sx, sy: P.scale * sy, a: P.a };
       };
-      // 外形（漸層）
-      add({ ...place([0, 0], c.shapeS, P.rot), c1, c2 }, i * 4);
+      // 外形（漸層 + 灰階鏡頭柔光）
+      add({ ...place([0, 0], c.shapeS, P.rot), c1, c2, cam: true }, i * 4);
       // 嘴巴、兩個眼睛：各自稍微游移
       const part = (n, off, s, baseRot, sy = 1) => {
         const w = st.parts[n], k = 1 + PART_SCALE * w.s(t);
@@ -258,7 +261,7 @@ export default {
       }
     });
 
-    this.gl.draw(stage.camera, L, dark, sprites);
+    this.gl.draw(stage.camera, L, dark, sprites, camMix * CHAR_CAM);
   },
 
   // 點到文或體：換眼睛、換漸層（體畫在上面，先檢查體）
@@ -341,7 +344,7 @@ void main(){
   c = mix(c, uBg, uDark);
   gl_FragColor = vec4(clamp(c + grain(), 0.0, 1.0), 1.0);
 }`;
-  // 4. 形狀：會轉的方塊貼形狀的圖；外形用漸層（上 → 下），眼睛嘴巴用 #313131
+  // 4. 形狀：會轉的方塊貼形狀的圖；外形用漸層（上 → 下），上面用柔光疊灰階的鏡頭畫面（不模糊）；眼睛嘴巴用 #313131
   const sprVS = `
 attribute vec2 p;
 uniform vec2 uRes, uC, uHalf, uRot;
@@ -352,16 +355,29 @@ void main(){
   vUV = p;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
 }`;
-  const sprFS = head + `
-uniform sampler2D uTex;
+  const sprFS = head + LUT_GLSL + `
+uniform sampler2D uTex, uCam;
 uniform vec3 uC1, uC2;
-uniform vec2 uGrad;
-uniform float uAlpha;
+uniform vec2 uGrad, uCamScale;
+uniform float uAlpha, uCamMix, uHasLut;
 varying vec2 vUV;
+// 柔光（和 Figma、Photoshop 的 soft light 一樣）：b 是下面的漸層，s 是上面的灰階鏡頭
+vec3 softLight(vec3 b, vec3 s){
+  vec3 d = mix(sqrt(b), ((16.0 * b - 12.0) * b + 4.0) * b, step(b, vec3(0.25)));
+  return mix(b - (1.0 - 2.0 * s) * b * (1.0 - b), b + (2.0 * s - 1.0) * (d - b), step(0.5, s));
+}
 void main(){
   float a = texture2D(uTex, vUV).a * uAlpha;
   if (a <= 0.0) discard;
   vec3 c = mix(uC1, uC2, clamp((vUV.y - uGrad.x) / uGrad.y, 0.0, 1.0));
+  if (uCamMix > 0.0) {
+    // 鏡頭畫面在這個像素的位置（和背景一樣 cover、左右鏡像，所以字像一扇窗）
+    vec2 t = (gl_FragCoord.xy / uRes - 0.5) * uCamScale + 0.5;
+    vec3 v = texture2D(uCam, vec2(1.0 - t.x, 1.0 - t.y)).rgb;
+    if (uHasLut > 0.5) v = lut(v);
+    float y = dot(v, vec3(0.2126, 0.7152, 0.0722));            // 灰階
+    c = mix(c, softLight(c, vec3(y)), uCamMix);
+  }
   c = clamp(c + grain(), 0.0, 1.0);
   gl_FragColor = vec4(c * a, a);
 }`;
@@ -446,6 +462,8 @@ void main(){
     setLut(L) {
       gl.useProgram(P.cam.p);
       lutTex = uploadLut(gl, P.cam.p, L, 1, lutTex);
+      gl.useProgram(P.spr.p);                         // 字裡面的鏡頭也套同一個調色
+      lutTex = uploadLut(gl, P.spr.p, L, 1, lutTex);
       hasLut = true;
     },
     // 把一個形狀畫成貼圖（白色，透明度就是形狀）；k：每個元件頁單位畫幾個像素
@@ -463,11 +481,13 @@ void main(){
       // w2, h2：整張圖（含留白）的大小；grad：形狀本身在圖裡的上下範圍（漸層用）
       return { tex, w2: w + PAD * 2, h2: h + PAD * 2, grad: [PAD / (h + PAD * 2), h / (h + PAD * 2)] };
     },
-    draw(video, L, dark, sprites) {
+    // camMix：字裡面的鏡頭有多明顯（0–1）
+    draw(video, L, dark, sprites, camMix = 0) {
       if (gl.isContextLost()) return;
       const w = canvas.width, h = canvas.height, d = w / L.W;
       const seed = [Math.random() * 1000, Math.random() * 1000];
       const hasCam = !!(video && video.videoWidth > 0);
+      let camScale = [1, 1];
       gl.disable(gl.BLEND);
       if (hasCam) {
         // 鏡頭 → 小張的圖（套調色）
@@ -482,11 +502,12 @@ void main(){
         const lw = Math.max(1, Math.round(L.W / LOW)), lh = Math.max(1, Math.round(L.H / LOW));
         sizeLow(lw, lh);
         const A = L.W / L.H, V = vw / vh;
+        camScale = [A > V ? 1 : A / V, A > V ? V / A : 1];
         gl.bindFramebuffer(gl.FRAMEBUFFER, fb[0].fbo);
         gl.viewport(0, 0, lw, lh);
         let U = use(P.cam, lw, lh, 1, seed);
         gl.uniform1i(U.uCam, 0);
-        gl.uniform2f(U.uCamScale, A > V ? 1 : A / V, A > V ? V / A : 1);
+        gl.uniform2f(U.uCamScale, camScale[0], camScale[1]);
         gl.uniform1f(U.uHasLut, hasLut ? 1 : 0);
         if (U.uLut) gl.uniform1i(U.uLut, 1);
         tri();
@@ -515,6 +536,10 @@ void main(){
       gl.enable(gl.BLEND);
       U = use(P.spr, w, h, d, seed);
       gl.uniform1i(U.uTex, 3);
+      gl.uniform1i(U.uCam, 0);                       // 鏡頭的貼圖還在單元 0、調色在單元 1
+      if (U.uLut) gl.uniform1i(U.uLut, 1);
+      gl.uniform1f(U.uHasLut, hasLut ? 1 : 0);
+      gl.uniform2f(U.uCamScale, camScale[0], camScale[1]);
       gl.activeTexture(gl.TEXTURE3);
       gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
       for (const sp of sprites) {
@@ -527,6 +552,7 @@ void main(){
         gl.uniform3fv(U.uC2, sp.c2 || INK);
         gl.uniform2f(U.uGrad, s.grad[0], s.grad[1]);
         gl.uniform1f(U.uAlpha, sp.a == null ? 1 : sp.a);
+        gl.uniform1f(U.uCamMix, hasCam && sp.cam ? camMix : 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
     },
