@@ -19,6 +19,12 @@ const BLEND_OFFSET = Math.random() * 200;
 const SPEED = 1;
 // 封面（相對於這個檔）
 const COVER = '../images/cover.webp';
+// 點封面：封面優雅地稍微放大、再回到原本的大小；點的地方同時閃一個白色圓形光暈（Figma intro 的 light）
+const COVER_POP = 1.04;                  // 放大到幾倍
+const COVER_POP_MS = 700;                // 放大再回來總共多久（毫秒；前 35% 放大、後面慢慢回來）
+const GLOW_R = 40;                       // 光暈的半徑（px；Figma：白色圓形 r 40）
+const GLOW_BLUR = 30;                    // 光暈的模糊（px；Figma：layer blur 15）
+const GLOW_MS = 700;                     // 光暈閃一下多久（毫秒；很快亮起來，再慢慢淡掉）
 // PLAY 左邊的耳機符號（相對於這個檔）
 const HEADPHONE = new URL('../images/headphone.svg', import.meta.url).href;
 // 進度線下面那行字
@@ -39,7 +45,10 @@ const CSS = `
 .ld.nogl .ld-bg{display:none}
 .ld-card{position:absolute;left:50%;top:50%;width:235px;height:518px;transform:translate(-50%,-50%) scale(var(--s,1));opacity:0;transition:opacity .9s ease}
 .ld.in .ld-card{opacity:1}
-.ld-cover{position:absolute;left:0;top:0;width:235px;height:235px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);object-fit:cover;display:block;background:#d2d6d3}
+.ld-art{position:absolute;left:0;top:0;width:235px;height:235px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.ld-cover{position:absolute;left:0;top:0;width:100%;height:100%;border-radius:10px;object-fit:cover;display:block;background:#d2d6d3}
+.ld-glows{position:absolute;inset:0;clip-path:inset(0 round 10px);pointer-events:none}
+.ld-glow{position:absolute;border-radius:50%;background:#fff;opacity:0;pointer-events:none}
 .ld-title{position:absolute;left:-1px;top:251px;font:32px/42px "BIZ UDPMincho","Hiragino Mincho ProN","Songti TC",serif;color:#748180;white-space:nowrap}
 .ld-artist{position:absolute;right:0;top:259px;width:19px;font:19px/21.048px "Shippori Antique","PingFang TC",sans-serif;color:#748180;text-align:center}
 .ld-line{position:absolute;left:0;top:402px;width:235px;height:1px;background:#fff}
@@ -67,6 +76,29 @@ export default {
   type: 'loading',
   name: 'loading',
 
+  // 點封面：放大一點點再回來，點的地方閃一個白色光暈（連點也會從現在的大小接著動，不會跳）
+  tapCover(e) {
+    const art = this.art, r = art.getBoundingClientRect();
+    if (!art.animate || !r.width) return;
+    const x = (e.clientX - r.left) / r.width * 235, y = (e.clientY - r.top) / r.height * 235;   // 封面上的位置（px）
+    const from = getComputedStyle(art).transform;
+    if (this.pop) this.pop.cancel();
+    this.pop = art.animate([
+      { transform: from === 'none' ? 'scale(1)' : from, easing: 'cubic-bezier(.22,.8,.3,1)' },
+      { transform: `scale(${COVER_POP})`, offset: 0.35, easing: 'cubic-bezier(.45,0,.25,1)' },
+      { transform: 'scale(1)' },
+    ], { duration: COVER_POP_MS });
+    const g = document.createElement('i');
+    g.className = 'ld-glow';
+    Object.assign(g.style, { left: x - GLOW_R + 'px', top: y - GLOW_R + 'px', width: GLOW_R * 2 + 'px', height: GLOW_R * 2 + 'px', filter: `blur(${GLOW_BLUR}px)` });
+    this.glows.appendChild(g);
+    g.animate([
+      { opacity: 0, transform: 'scale(.6)', easing: 'cubic-bezier(.2,.7,.3,1)' },
+      { opacity: 1, transform: 'scale(1)', offset: 0.15, easing: 'cubic-bezier(.3,0,.4,1)' },
+      { opacity: 0, transform: 'scale(1.2)' },
+    ], { duration: GLOW_MS }).onfinish = () => g.remove();
+  },
+
   // el：全螢幕的容器；ctx.asset(p)：把相對路徑換成網址
   mount(el, ctx) {
     if (!document.getElementById('ld-css')) {
@@ -77,7 +109,7 @@ export default {
       '<div class="ld">' +
         '<canvas class="ld-bg"></canvas>' +
         '<div class="ld-card">' +
-          '<img class="ld-cover" alt="">' +
+          '<div class="ld-art"><img class="ld-cover" alt=""><div class="ld-glows"></div></div>' +
           '<div class="ld-title">' + titleHTML() + '</div>' +
           '<div class="ld-artist">梅<br>林<br>玫<br>羚</div>' +
           '<div class="ld-line"><i></i></div>' +
@@ -91,6 +123,9 @@ export default {
     this.bar = el.querySelector('.ld-line i');
     this.btn = el.querySelector('.ld-btn');
     this.btn.addEventListener('click', () => { if (this.isReady && this.go) this.go(); });
+    this.art = el.querySelector('.ld-art');
+    this.glows = el.querySelector('.ld-glows');
+    this.art.addEventListener('pointerdown', e => this.tapCover(e));
 
     this.target = 0; this.shown = 0; this.isReady = false; this.wantReady = false; this.go = null;
 
