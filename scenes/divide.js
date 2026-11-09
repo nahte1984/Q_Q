@@ -3,7 +3,7 @@
    --------------------------------------------------------------------------
    22041 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
               點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）。
-   29589 ms   九格用隨機的順序錯落地淡出，最後一格在 31759 ms 完全消失，
+   30089 ms   九格用隨機的順序錯落地淡出，最後一格在 32259 ms 完全消失，
               露出下面已經開始的 word（index.html 用 transition: 'under'）。
               前鏡頭畫面鋪滿整個畫面（像 object-fit: cover），每一格只露出自己那一塊，
               再各自套一種 grainrad 的效果；九格拼起來就是完整的鏡頭畫面。
@@ -32,8 +32,8 @@ const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫�
                                          // false：只有效果換位子，畫面還是完整的
 
 /* ---------- 退場：九格用隨機的順序錯落地淡出 ---------- */
-const OUTRO_FROM = 29589;                // 第一格開始淡出（毫秒，歌曲時間；index.html 裡 word 那一行的 at）
-const OUTRO_TO = 31759;                  // 最後一格完全消失（index.html 裡 word 那一行的 dur = 這兩個數字的差）
+const OUTRO_FROM = 30089;                // 第一格開始淡出（毫秒，歌曲時間；index.html 裡 word 那一行的 at）
+const OUTRO_TO = 32259;                  // 最後一格完全消失（index.html 裡 word 那一行的 dur = 這兩個數字的差）
 const OUTRO_FADE = 600;                  // 每一格淡出花多久（毫秒）；九格的開始時間分散在剩下的時間裡
 const OUTRO_JITTER = 0.7;                // 開始時間的不規則程度（0 = 間隔平均；1 = 最亂）
 const BG_OUT = 500;                      // 開始淡出之後，底色多久消失（格子淡掉的地方才會露出下面的 word）
@@ -80,7 +80,7 @@ const HOME = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 export default {
   name: 'divide',
   needs: { camera: true },
-  dev: { from: 22041, to: 31759 },
+  dev: { from: 22041, to: 32259 },
 
   async preload(stage) {
     this.canvas = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });   // 最多 2 倍（3 倍的手機上看不出差別，顯示卡輕很多）
