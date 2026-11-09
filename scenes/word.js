@@ -10,9 +10,10 @@
               到定位之後，兩個字都在定位附近微微地隨機游移、微幅旋轉；
               眼睛和嘴巴三個符號也各自稍微游移，大小和角度有非常些微的變化。
    眼睛：      八組，一開始隨機給文和體各一組（不重複）；嘴巴固定。
-   點擊文／體： 換那個字的眼睛（舊的眼睛高度迅速變成 0，新的再從 0 變回原本的大小，像眨眼；
-              兩隻眼睛隨機一前一後，差一點點時間），
-              同時從那幾個顏色裡隨機選兩個不重複的顏色換成新的漸層。
+   點擊畫面任一處：文和體同時換漸層（各自從那幾個顏色裡隨機選兩個不重複的顏色）。
+   點到文／體： 另外再換那個字的眼睛（舊的眼睛高度迅速變成 0，新的再從 0 變回原本的大小，像眨眼；
+              兩隻眼睛隨機一前一後，差一點點時間），那個字（連同眼睛嘴巴）也同時永久變大一點，
+              用彈的（衝過頭一點再彈回來，晃兩三下停在新的大小）；每點一次就再大一點，最多到原本的 GROW_MAX 倍。
    41134 ms   文、體和六個符號（兩張嘴、四隻眼睛）用隨機的順序錯落地往下掉（像重力一樣越掉越快，
               各自帶一點自轉和左右偏移；符號比較輕，轉得比較快），最慢的那一個在 42334 ms 完全掉出畫面；
               字裡面的鏡頭畫面同時淡掉。之後維持一片 #313131，到 43210 ms 換成 slit。
@@ -75,6 +76,12 @@ const BLINK_CLOSE = 90;                  // 舊的眼睛閉上（高度變成 0�
 const BLINK_OPEN = 140;                  // 新的眼睛張開要多久（毫秒）
 const BLINK_LAG = [30, 110];             // 兩隻眼睛隨機一前一後，相差多少毫秒（每次點擊在這個範圍內隨機）
 const COLOR_FADE = 300;                  // 漸層換顏色要多久（毫秒）
+// 點到字：那個字永久變大一點，用彈的（像彈簧：衝過頭一點再彈回來，晃幾下停在新的大小）
+const GROW = 0.06;                       // 每點一次變大多少（0.06 = 6%，會一直累積）
+const GROW_MAX = 1.5;                    // 最多變成原本的幾倍（到了之後再點只會原地彈一下）
+const BUMP = 0.06;                       // 到最大之後再點，原地彈一下的幅度（0.06 = 約 6%）
+const BUMP_HZ = 4;                       // 彈的快慢（每秒晃幾下）
+const BUMP_DAMP = 0.3;                   // 停下來的快慢（越小晃越多下；0.3 大約晃兩三下）
 
 const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;   // 顆粒（和其他段落一樣）
 
@@ -92,6 +99,11 @@ const popIn = ms => {
   const k = u >= 1 ? 1 : 1 - (1 - POP_FROM) * Math.exp(-POP_BOUNCE * u) * Math.cos(POP_WAVES * Math.PI * u) * (1 - u ** 4);
   return { k, a: smooth(clamp01(ms / POP_FADE)) };
 };
+// 彈簧：x 是現在的大小（1 = 原本大小）、to 是要停下來的大小、v 是速度；
+// 點一下 to 就變大一點，x 會彈過去；已經最大的話就給它一個往外的速度 BUMP_V，原地彈一下
+const BUMP_W = 2 * Math.PI * BUMP_HZ, BUMP_WD = BUMP_W * Math.sqrt(1 - BUMP_DAMP * BUMP_DAMP);
+const BUMP_TP = Math.atan2(BUMP_WD, BUMP_DAMP * BUMP_W) / BUMP_WD;             // 第一次彈到最大的時間
+const BUMP_V = BUMP * BUMP_WD / (Math.exp(-BUMP_DAMP * BUMP_W * BUMP_TP) * Math.sin(BUMP_WD * BUMP_TP));
 const shuffled = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 // 一組緩慢、自然的隨機擺動（-1 ~ 1）
 const wobble = hz => {
@@ -120,7 +132,7 @@ export default {
     catch (err) { console.warn('word：調色檔沒有套用', err); }
 
     // 形狀先畫成貼圖（照最大可能的大小畫，放大縮小都清楚）
-    const k = SIZE * 1.45 * Math.min(2, window.devicePixelRatio || 1) * 1.15;
+    const k = SIZE * 1.45 * Math.min(2, window.devicePixelRatio || 1) * 1.15 * GROW_MAX;   // 字變到最大也還是清楚
     const sprite = piece => this.gl.addSprite(piece, k);
     const half = s => Math.hypot(s.w2, s.h2) / 2;   // 貼圖對角線的一半（退場時算什麼時候掉出畫面）
     this.chars = CHARS.map(c => {
@@ -152,6 +164,7 @@ export default {
     this.state = this.chars.map((c, i) => ({
       eye: { cur: i ? second : first, next: null, t0: 0, lag: [0, 0] },
       col: { from: c.colors, to: c.colors, t0: 0 },
+      size: { x: 1, v: 0, to: 1 },                   // 點到字時變大（用彈的）
       wx: wobble(WANDER_HZ), wy: wobble(WANDER_HZ), wr: wobble(WANDER_HZ),
       parts: [0, 1, 2].map(() => ({ x: wobble(PART_HZ), y: wobble(PART_HZ), s: wobble(PART_HZ), r: wobble(PART_HZ) })),
     }));
@@ -185,7 +198,7 @@ export default {
       x: L.ox + (c.at[0] + WANDER_PX * st.wx(t)) * L.s,
       y: L.oy + (c.at[1] + WANDER_PX * st.wy(t)) * L.s,
       rot: c.rot + WANDER_DEG * st.wr(t),
-      scale: SIZE * L.s * k,
+      scale: SIZE * L.s * k * st.size.x,
     };
   },
 
@@ -198,6 +211,13 @@ export default {
     if (!this.gl || !this.state) return;
     const ms = f.t * 1000, t = f.t, now = performance.now();
     this.ms = ms;
+    // 彈簧往前算到現在（每一小步不超過 8 毫秒，才不會算歪）
+    const dt = Math.min(0.25, Math.max(0, (now - (this.lastNow || now)) / 1000));   // 手機比較慢、一幀比較久也照實際時間算
+    this.lastNow = now;
+    for (const st of this.state) {
+      const b = st.size, n = Math.ceil(dt / 0.008), h = dt / Math.max(1, n);
+      for (let k = 0; k < n; k++) { b.v += (-BUMP_W * BUMP_W * (b.x - b.to) - 2 * BUMP_DAMP * BUMP_W * b.v) * h; b.x += b.v * h; }
+    }
     const L = this.layout(stage);
     this.L = L;
     const sprites = [];
@@ -207,9 +227,9 @@ export default {
     const T = OUT_DUR / 1000, S = SIZE * L.s;
     let g = 0;
     this.chars.forEach((c, i) => {
-      const y0 = L.oy + c.at[1] * L.s, mc = center(c.mouth.box);
+      const y0 = L.oy + c.at[1] * L.s, mc = center(c.mouth.box), Si = S * this.state[i].size.to * 1.08;   // 字變大了也算進去（多留一點彈的空間）
       [[0, c.R], [mc[1] - c.sc[1], c.mouthR], [c.eyes[1], this.eyeR], [c.eyes[1], this.eyeR]].forEach(([oy, r], j) => {
-        const y = y0 + oy * S, R = r * S + (WANDER_PX + 6) * L.s, left = T * (1 - this.fall[i * 4 + j].at);
+        const y = y0 + oy * Si, R = r * Si + (WANDER_PX + 6) * L.s, left = T * (1 - this.fall[i * 4 + j].at);
         g = Math.max(g, 2 * (L.H + R - y) / (left * left));
       });
     });
@@ -261,11 +281,16 @@ export default {
     this.gl.draw(stage.camera, L, sprites, camMix * CHAR_CAM);
   },
 
-  // 點到文或體：換眼睛、換漸層（體畫在上面，先檢查體）
+  // 點畫面任一處：兩個字都換漸層；點到文或體：那個字再換眼睛、彈一下（體畫在上面，先檢查體）
   tap(stage, e) {
     if (!this.state || !this.L || this.ms >= OUT_AT) return;
     const r = stage.root.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top, now = performance.now();
+    // 漸層：從現在的顏色換到新的兩個顏色
+    for (const st of this.state) {
+      const cur = this.colorsOf(st, now);
+      st.col = { from: cur.map(v => '#' + v.map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join('')), to: pickColors(st.col.to), t0: now };
+    }
     for (let i = this.chars.length - 1; i >= 0; i--) {
       const c = this.chars[i], P = this.pose(i, this.L, this.ms, this.ms / 1000);
       if (P.a < 0.5) continue;                       // 還沒出現
@@ -280,9 +305,9 @@ export default {
       ey.t0 = now;
       const lag = rnd(BLINK_LAG);
       ey.lag = Math.random() < 0.5 ? [0, lag] : [lag, 0];   // 隨機哪一隻先眨
-      // 漸層：從現在的顏色換到新的兩個顏色
-      const cur = this.colorsOf(st, now);
-      st.col = { from: cur.map(v => '#' + v.map(x => Math.round(x * 255).toString(16).padStart(2, '0')).join('')), to: pickColors(st.col.to), t0: now };
+      const sz = st.size;                            // 變大一點（用彈的）；已經最大就原地彈一下
+      if (sz.to < GROW_MAX - 1e-6) sz.to = Math.min(GROW_MAX, sz.to * (1 + GROW));
+      else sz.v += BUMP_V;
       return;
     }
   },
