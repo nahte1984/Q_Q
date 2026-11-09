@@ -3,12 +3,11 @@
    --------------------------------------------------------------------------
    22041 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
               點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）。
-   29589 ms   九格隨機錯落地往下掉（各自帶一點自轉和左右偏移），最慢的那一格在 31759 ms 完全掉出畫面；
-              背景色同時消失，露出下面已經開始的 word（index.html 用 transition: 'under'）。
-              前鏡頭畫面鋪滿整個九宮格（像 object-fit: cover），每一格只露出自己那一塊，
-              再各自套一種 grainrad 的效果；九格拼起來就是原本完整的鏡頭畫面（格子之間的縫會蓋掉一點）。
-   版面：      格子和格子、格子和瀏覽器邊界都距離 5px，九宮格放到最大，直到碰到畫面的寬或高；
-              格子比例照 Figma「Frame 4」（122 × 197），圓角 5。
+   29589 ms   九格用隨機的順序錯落地淡出，最後一格在 31759 ms 完全消失，
+              露出下面已經開始的 word（index.html 用 transition: 'under'）。
+              前鏡頭畫面鋪滿整個畫面（像 object-fit: cover），每一格只露出自己那一塊，
+              再各自套一種 grainrad 的效果；九格拼起來就是完整的鏡頭畫面。
+   版面：      整個畫面均分成九宮格（寬、高各三等份），格子之間沒有縫、沒有圓角。
 
    效果的演算法照 grainrad.com 的 shader 寫（參數用截圖 01–09 的設定），
    由左到右、由上到下：
@@ -19,10 +18,7 @@
    ========================================================================== */
 
 /* ---------- 版面 ---------- */
-const CARD_W = 122, CARD_H = 197;        // 格子比例（Figma）
-const GAP = 5;                           // 格子之間、格子和瀏覽器邊界的距離（px）
-const RADIUS = 5;                        // 圓角（px）
-const BG_COLOR = '#313131';              // 格子外面
+const BG_COLOR = '#313131';              // 格子下面的底色（進場時蓋過上一段；換位子時格子重新淡入的底）
 
 /* ---------- 進場：九格用隨機的順序一格一格淡入，背景色同時蓋過上一段 ----------
    index.html 裡 divide 那一行的 dur 要和 INTRO 一樣 */
@@ -35,20 +31,16 @@ const TAP_SPREAD = 200;                  // 九格的淡入開始時間在這段
 const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
                                          // false：只有效果換位子，畫面還是完整的
 
-/* ---------- 退場：九格隨機錯落地掉到畫面下方（像重力一樣越掉越快） ---------- */
-const OUTRO_FROM = 29589;                // 開始掉（毫秒，歌曲時間；index.html 裡 word 那一行的 at）
-const OUTRO_TO = 31759;                  // 最慢的那一格完全掉出畫面（index.html 裡 word 那一行的 dur = 這兩個數字的差）
-const BG_OUT = 500;                      // 開始掉之後，格子外面的背景色多久消失（露出下面的 word）
-const OUTRO_SPREAD = 0.45;               // 九格開始掉的時間隨機錯開多少（佔整段時間的比例；0 = 一起掉）
-// 每一格掉的時候隨機帶一點自轉和左右偏移（同一格往哪邊轉就往哪邊偏，像失去平衡倒下去）
-const FALL_SPIN = [4, 18];               // 一開始的自轉速度（度/秒，隨機在這個範圍內）
-const FALL_SPIN_ACC = [4, 20];           // 自轉越轉越快（度/秒²）
-const FALL_DRIFT = [5, 30];              // 一開始的左右偏移速度（px/秒）
-const FALL_DRIFT_ACC = [0, 20];          // 左右偏移越來越快（px/秒²）
+/* ---------- 退場：九格用隨機的順序錯落地淡出 ---------- */
+const OUTRO_FROM = 29589;                // 第一格開始淡出（毫秒，歌曲時間；index.html 裡 word 那一行的 at）
+const OUTRO_TO = 31759;                  // 最後一格完全消失（index.html 裡 word 那一行的 dur = 這兩個數字的差）
+const OUTRO_FADE = 600;                  // 每一格淡出花多久（毫秒）；九格的開始時間分散在剩下的時間裡
+const OUTRO_JITTER = 0.7;                // 開始時間的不規則程度（0 = 間隔平均；1 = 最亂）
+const BG_OUT = 500;                      // 開始淡出之後，底色多久消失（格子淡掉的地方才會露出下面的 word）
 
 /* ---------- 效果的尺寸 ----------
    grainrad 的參數（間距 11、方塊 15…）是以 1280 × 720 的鏡頭畫面為單位。
-   這裡把鏡頭畫面的高度（720）對齊九宮格的高度，所以效果和人臉的比例跟 grainrad 上看到的一樣。
+   這裡把鏡頭畫面的高度（720）對齊畫面的高度，所以效果和人臉的比例跟 grainrad 上看到的一樣。
    覺得點點、方塊太大或太小，就調 EFFECT_SCALE（1 = 照 grainrad；0.8 = 小 20%） */
 const EFFECT_SCALE = 1;
 
@@ -97,7 +89,7 @@ export default {
     if (!this.gl) console.warn('這個瀏覽器不支援 WebGL，divide 不會出現');
     this.reset();
     // 暖機：九種效果都先畫一次（透明的），讓手機先把 shader 準備好，進場時才不會卡一下
-    if (this.gl) this.gl.draw(null, this.layout(stage), 0, HOME.map(c => ({ fx: c, a: 0, x: 0, y: 0, sx: 0, sy: 0 })), 0);
+    if (this.gl) this.gl.draw(null, this.layout(stage), 0, HOME.map(c => ({ fx: c, a: 0, at: c, src: c })), 0);
     // 點畫面：換位子
     stage.root.style.touchAction = 'manipulation';
     stage.root.addEventListener('pointerdown', () => { if (this.active && this.ms < OUTRO_FROM) this.shuffle(); });   // 開始掉了就不換
@@ -108,13 +100,13 @@ export default {
     this.slot = HOME.slice();             // 第 c 格（第 c 種效果）現在在哪個位置
     this.tapOrder = HOME.slice();         // 換位子後重新淡入的順序
     this.tapAt = -Infinity;
-    // 退場：每一格什麼時候開始掉（佔整段時間的比例）；順序隨機，間隔也稍微不規則
-    const rank = shuffled(HOME);
-    this.fallAt = HOME.map(c => (rank.indexOf(c) + Math.random() * 0.8) / 9 * OUTRO_SPREAD);
-    const rnd = ([a, b]) => a + Math.random() * (b - a);
-    this.fall = HOME.map(() => {
-      const dir = Math.random() < 0.5 ? -1 : 1;      // 往左倒或往右倒
-      return { spin: dir * rnd(FALL_SPIN), spinAcc: dir * rnd(FALL_SPIN_ACC), drift: dir * rnd(FALL_DRIFT), driftAcc: dir * rnd(FALL_DRIFT_ACC) };
+    // 退場：每一格什麼時候開始淡出（毫秒，歌曲時間）；順序隨機，間隔也不規則；
+    // 第一格在 OUTRO_FROM 開始，最後一格剛好在 OUTRO_TO 淡完
+    const rank = shuffled(HOME), span = OUTRO_TO - OUTRO_FROM - OUTRO_FADE;
+    this.fadeAt = HOME.map(c => {
+      const r = rank.indexOf(c);
+      const j = r > 0 && r < 8 ? (Math.random() - 0.5) * OUTRO_JITTER : 0;
+      return OUTRO_FROM + (r + j) / 8 * span;
     });
     this.ms = 0;
   },
@@ -131,55 +123,35 @@ export default {
     this.tapAt = performance.now();
   },
 
-  // 九宮格在畫面上的位置：四周和格子之間都留 GAP，格子放到最大（寬或高先碰到邊界為止），置中
+  // 九宮格就是整個畫面
   layout(stage) {
-    const W = stage.width, H = stage.height;
-    const cw = Math.max(1, Math.min((W - GAP * 4) / 3, (H - GAP * 4) / 3 * CARD_W / CARD_H));
-    const ch = cw * CARD_H / CARD_W;
-    const gw = cw * 3 + GAP * 2, gh = ch * 3 + GAP * 2;
-    return { W, cw, ch, gw, gh, x: (W - gw) / 2, y: (H - gh) / 2 };
+    return { W: stage.width, gw: stage.width, gh: stage.height };
   },
 
   update(stage, f) {
     if (!this.gl) return;
-    const L = this.layout(stage), sx = L.cw + GAP, sy = L.ch + GAP;
+    const L = this.layout(stage);
     const t = f ? f.local * 1000 : INTRO;          // 進場進度（毫秒，照音樂時間）
     const ms = (this.ms = f ? f.t * 1000 : 0);
     const sinceTap = performance.now() - this.tapAt;
-    // 退場：重力加速度取「最慢的那一格剛好在 OUTRO_TO 掉出畫面」（格子會轉，所以用對角線的一半當作它最大的半徑）
-    const T = (OUTRO_TO - OUTRO_FROM) / 1000, H = stage.height, R = Math.hypot(L.cw, L.ch) / 2 + 2;
-    let g = 0;
-    for (let c = 0; c < 9; c++) {
-      const cy = L.y + slotXY(this.slot[c]).y * sy + L.ch / 2, left = T * (1 - this.fallAt[c]);
-      g = Math.max(g, 2 * (H + R - cy) / (left * left));
-    }
     const cards = [];
     for (let c = 0; c < 9; c++) {
       const start = this.order.indexOf(c) * (INTRO - CARD_FADE) / 8;
       const tapStart = this.tapOrder.indexOf(c) * TAP_SPREAD / 8;
-      const a = smooth(clamp01((t - start) / CARD_FADE)) * smooth(clamp01((sinceTap - tapStart) / TAP_FADE));
+      const out = 1 - smooth(clamp01((ms - this.fadeAt[c]) / OUTRO_FADE));   // 退場淡出
+      const a = smooth(clamp01((t - start) / CARD_FADE)) * smooth(clamp01((sinceTap - tapStart) / TAP_FADE)) * out;
       if (a <= 0) continue;
-      const p = slotXY(this.slot[c]);
-      const x = p.x * sx, y = p.y * sy;             // 格子原本的位置（相對九宮格左上角）
-      const fl = this.fall[c], k = Math.max(0, (ms - OUTRO_FROM) / 1000 - this.fallAt[c] * T);   // 這一格掉了幾秒
-      const dx = fl.drift * k + 0.5 * fl.driftAcc * k * k;
-      const dy = 0.5 * g * k * k;
-      const rot = (fl.spin * k + 0.5 * fl.spinAcc * k * k) * Math.PI / 180;
-      if (L.y + y + L.ch / 2 + dy - R > H) continue;   // 已經掉出畫面
-      const home = slotXY(c);
       cards.push({
-        fx: c, a, x: L.x + x + dx, y: L.y + y + dy, rot,
-        sx: SHUFFLE_CARRIES_IMAGE ? home.x * sx : x,   // 這一格的畫面從九宮格的哪裡取（掉下去時畫面跟著格子走）
-        sy: SHUFFLE_CARRIES_IMAGE ? home.y * sy : y,
+        fx: c, a,
+        at: this.slot[c],                                  // 畫在第幾格
+        src: SHUFFLE_CARRIES_IMAGE ? c : this.slot[c],     // 畫面從第幾格取
       });
     }
     const v = stage.camera;
-    const bgA = clamp01(t / INTRO) * (1 - smooth(clamp01((ms - OUTRO_FROM) / BG_OUT)));   // 進場時蓋過上一段；開始掉的時候消失
+    const bgA = clamp01(t / INTRO) * (1 - smooth(clamp01((ms - OUTRO_FROM) / BG_OUT)));   // 進場時蓋過上一段；開始淡出的時候消失
     this.gl.draw(v && v.videoWidth > 0 ? v : null, L, f ? f.t : 0, cards, bgA);
   },
 };
-
-function slotXY(s) { return { x: s % 3, y: Math.floor(s / 3) }; }
 
 function bakeAtlas() {
   const c = document.createElement('canvas');
@@ -202,13 +174,11 @@ function effectLayer(canvas, atlas) {
   const vs = `
 attribute vec2 p;
 uniform vec2 uRes;
-uniform vec4 uRect;          // 這一格在畫面上的位置（裝置像素，四邊各多 1px 讓邊緣柔化）
-uniform vec2 uRot;           // 自轉（cos, sin），繞格子中心
-varying vec2 vLocal;         // 格子裡的位置（裝置像素，跟著格子一起轉）
+uniform vec4 uRect;          // 這一格在畫面上的位置（裝置像素，對齊像素邊界，相鄰的格子剛好接上、不留縫）
+varying vec2 vLocal;         // 格子裡的位置（裝置像素）
 void main(){
-  vec2 local = p * uRect.zw, mid = uRect.zw * 0.5, d = local - mid;
-  vec2 px = uRect.xy + mid + vec2(d.x * uRot.x - d.y * uRot.y, d.x * uRot.y + d.y * uRot.x);
-  vLocal = local - 1.0;
+  vLocal = p * uRect.zw;
+  vec2 px = uRect.xy + vLocal;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
 }`;
   const fs = `
@@ -218,7 +188,7 @@ precision highp float;
 precision mediump float;
 #endif
 uniform sampler2D uCam, uAtlas;
-uniform float uHasCam, uUnit, uTime, uRadius, uGrain, uGrainPx, uFx, uAlpha;
+uniform float uHasCam, uUnit, uTime, uGrain, uGrainPx, uFx, uAlpha;
 uniform vec3 uBgCol;
 uniform vec2 uCard, uGridG, uCamScale, uSeed, uSrc;
 uniform vec3 uLine;
@@ -362,14 +332,11 @@ vec3 fxThreshold(vec2 q){
 
 void main(){
   float grain = (grainHash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain;
-  if (uFx < -0.5) {                                        // 背景（格子外面）：和格子一樣加顆粒
+  if (uFx < -0.5) {                                        // 底色：和格子一樣加顆粒
     vec3 b = clamp(uBgCol + grain, 0.0, 1.0);
     gl_FragColor = vec4(b * uAlpha, uAlpha);
     return;
   }
-  vec2 r = abs(vLocal - uCard * 0.5) - (uCard * 0.5 - uRadius);
-  float inside = clamp(0.5 - (length(max(r, 0.0)) + min(max(r.x, r.y), 0.0) - uRadius), 0.0, 1.0);   // 圓角
-  if (inside <= 0.0) discard;
   vec2 q = (uSrc + clamp(vLocal, vec2(0.0), uCard)) / uUnit;   // grainrad 的像素座標
   vec3 c;
   if (uFx < 0.5) c = fxHalftone(q);
@@ -382,8 +349,7 @@ void main(){
   else if (uFx < 7.5) c = fxVoronoi(q);
   else c = fxThreshold(q);
   c = clamp(c + grain, 0.0, 1.0);
-  float a = inside * uAlpha;
-  gl_FragColor = vec4(c * a, a);
+  gl_FragColor = vec4(c * uAlpha, uAlpha);
 }`;
   const sh = (type, src) => {
     const o = gl.createShader(type); gl.shaderSource(o, src); gl.compileShader(o);
@@ -424,7 +390,7 @@ void main(){
 
   const u = n => gl.getUniformLocation(prog, n);
   const U = {};
-  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uRadius', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uRot', 'uBgCol', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
+  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uBgCol', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
   gl.uniform1i(u('uCam'), 0);
   gl.uniform1i(u('uAtlas'), 1);
   gl.uniform3fv(u('uLine'), hex(P.contour.lineColor));
@@ -441,7 +407,7 @@ void main(){
   };
 
   return {
-    // cards：[{ fx: 第幾種效果, x, y: 格子左上角（CSS px）, sx, sy: 畫面從九宮格的哪裡取（CSS px）, a: 透明度 }]
+    // cards：[{ fx: 第幾種效果, at: 畫在第幾格, src: 畫面從第幾格取, a: 透明度 }]（格子 0–8，由左到右、由上到下）
     // bgA：背景色的透明度（進場時從 0 到 1，蓋過上一段）
     draw(video, L, time, cards, bgA) {
       if (gl.isContextLost()) return;
@@ -467,24 +433,28 @@ void main(){
       gl.uniform1f(U.uUnit, unit * d);
       gl.uniform1f(U.uTime, time || 0);
       gl.uniform2f(U.uRes, Wd, Hd);
-      gl.uniform2f(U.uCard, L.cw * d, L.ch * d);
-      gl.uniform1f(U.uRadius, RADIUS * d);
       gl.uniform2f(U.uGridG, L.gw / unit, L.gh / unit);
       gl.uniform2f(U.uCamScale, A > V ? 1 : A / V, A > V ? V / A : 1);
       gl.uniform2f(U.uSeed, Math.random() * 1000, Math.random() * 1000);
       gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
-      // 背景：整個畫面鋪一層 #313131（加顆粒），進場時透明度從 0 到 1
+      // 底色：整個畫面鋪一層 #313131（加顆粒），進場時透明度從 0 到 1
       if (bgA > 0) {
-        gl.uniform4f(U.uRect, -1, -1, Wd + 2, Hd + 2);
-        gl.uniform2f(U.uRot, 1, 0);
+        gl.uniform4f(U.uRect, 0, 0, Wd, Hd);
         gl.uniform1f(U.uFx, -1);
         gl.uniform1f(U.uAlpha, bgA);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
+      // 第 s 格（0–8，由左到右、由上到下）的位置：格線取整數像素，九格剛好鋪滿畫布
+      const edge = (i, n) => Math.round(i * n / 3);
+      const cell = s => {
+        const cx = s % 3, cy = (s - cx) / 3, x0 = edge(cx, Wd), y0 = edge(cy, Hd);
+        return [x0, y0, edge(cx + 1, Wd) - x0, edge(cy + 1, Hd) - y0];
+      };
       for (const c of cards) {
-        gl.uniform4f(U.uRect, c.x * d - 1, c.y * d - 1, L.cw * d + 2, L.ch * d + 2);
-        gl.uniform2f(U.uRot, Math.cos(c.rot || 0), Math.sin(c.rot || 0));
-        gl.uniform2f(U.uSrc, c.sx * d, c.sy * d);
+        const [x, y, w, h] = cell(c.at), [sx, sy] = cell(c.src);
+        gl.uniform4f(U.uRect, x, y, w, h);
+        gl.uniform2f(U.uCard, w, h);
+        gl.uniform2f(U.uSrc, sx, sy);
         gl.uniform1f(U.uFx, c.fx);
         gl.uniform1f(U.uAlpha, c.a);
         gl.drawArrays(gl.TRIANGLES, 0, 6);

@@ -1,7 +1,7 @@
 /* ==========================================================================
    word — 文、體（Figma wenTi）
    --------------------------------------------------------------------------
-   29589 ms   divide 的九格開始往下掉，露出下面這一段（一片 #313131，加細顆粒）。
+   29589 ms   divide 的九格開始錯落淡出，露出下面這一段（一片 #313131，加細顆粒）。
    31024 ms   模糊的鏡頭背景淡入（1 秒）：前鏡頭畫面套 color.CUBE 調色、模糊 10，上面壓一層 #313131 透明度 80%。
    31345 ms   「文」從最終大小的 75% 彈出來（約 1.25 秒；一開始很快淡入，彈到最大再略微縮小，QQ 的感覺）；
               約 200 毫秒之後（31545 ms）「體」開始彈，32795 ms 兩個字都完整彈出來。
@@ -11,10 +11,11 @@
    點擊文／體： 換那個字的眼睛（舊的眼睛高度迅速變成 0，新的再從 0 變回原本的大小，像眨眼；
               兩隻眼睛隨機一前一後，差一點點時間），
               同時從那幾個顏色裡隨機選兩個不重複的顏色換成新的漸層。
-   41834 ms   兩個字先略微變大，再迅速縮小到 75% 同時淡出（約半秒，42334 ms 完整消失），背景同時變成 #313131 不透明；
-              之後維持一片 #313131，到 43210 ms 換成 slit。
+   41134 ms   文、體和六個符號（兩張嘴、四隻眼睛）用隨機的順序錯落地往下掉（像重力一樣越掉越快，
+              各自帶一點自轉和左右偏移；符號比較輕，轉得比較快），最慢的那一個在 42334 ms 完全掉出畫面；
+              背景同時變成 #313131 不透明。之後維持一片 #313131，到 43210 ms 換成 slit。
 
-   index.html：word 用 transition: 'under' 接在 divide 後面（divide 疊在上面自己往下掉），
+   index.html：word 用 transition: 'under' 接在 divide 後面（divide 疊在上面自己淡出），
    全部用同一個 WebGL 畫布畫（形狀先畫成貼圖），顆粒和其他段落一樣。
    ========================================================================== */
 
@@ -22,7 +23,7 @@ import { LUT_FILE, parseCube, LUT_GLSL, uploadLut } from './lut.js';
 import { WEN, TI, WEN_MOUTH, TI_MOUTH, EYES } from './word-shapes.js';
 
 /* ---------- 時間（毫秒，歌曲時間） ---------- */
-const START = 29589;                     // 這一段開始（divide 的格子從這裡開始往下掉）
+const START = 29589;                     // 這一段開始（divide 的格子從這裡開始淡出）
 const CAM_AT = 31024;                    // 模糊的鏡頭背景開始淡入（之前是一片 #313131）
 const CAM_FADE = 1000;                   // 鏡頭背景淡入要多久
 const WEN_AT = 31345;                    // 「文」開始彈出來
@@ -32,10 +33,18 @@ const TI_AT = WEN_AT + TI_DELAY;         // 「體」開始彈出來（31545；3
 const POP_FROM = 0.75;                   // 彈進場的起始大小（最終大小的幾倍；一開始很快地淡入）
 const POP_FADE = 120;                    // 一開始淡入要多久（毫秒）
 const POP_BOUNCE = 2.5, POP_WAVES = 3;   // 彈的樣子：從 0.75 彈到最大（約 1.11 倍）再略微縮小（約 0.96 倍）再回到原本大小
-const OUT_TO = 0.75;                     // 彈出場：先略微變大，再縮小到最終大小的這個倍數，同時淡出
-const GONE = 42334;                      // 兩個字完整消失
-const OUT_DUR = 500;                     // 迅速彈回縮小消失要多久
-const OUT_AT = GONE - OUT_DUR;           // 開始縮（41834）
+
+/* ---------- 退場：文、體和六個符號錯落地往下掉 ---------- */
+const GONE = 42334;                      // 最慢的那一個完全掉出畫面
+const OUT_DUR = 1200;                    // 從第一個開始掉到全部掉出畫面要多久（毫秒）
+const OUT_AT = GONE - OUT_DUR;           // 第一個開始掉（41134）
+const FALL_SPREAD = 0.45;                // 八個開始掉的時間隨機錯開多少（佔 OUT_DUR 的比例；0 = 一起掉）
+// 每一個掉的時候隨機帶一點自轉和左右偏移（往哪邊轉就往哪邊偏，像失去平衡倒下去）
+const FALL_SPIN = [4, 18];               // 一開始的自轉速度（度/秒，隨機在這個範圍內）
+const FALL_SPIN_ACC = [4, 20];           // 自轉越轉越快（度/秒²）
+const FALL_DRIFT = [5, 30];              // 一開始的左右偏移速度（px/秒）
+const FALL_DRIFT_ACC = [0, 20];          // 左右偏移越來越快（px/秒²）
+const PART_SPIN = 3;                     // 眼睛、嘴巴比較輕：自轉是字的幾倍
 
 /* ---------- 背景 ---------- */
 const BG_COLOR = '#313131';
@@ -82,11 +91,7 @@ const popIn = ms => {
   const k = u >= 1 ? 1 : 1 - (1 - POP_FROM) * Math.exp(-POP_BOUNCE * u) * Math.cos(POP_WAVES * Math.PI * u) * (1 - u ** 4);
   return { k, a: smooth(clamp01(ms / POP_FADE)) };
 };
-// 彈出場：先略微變大（約 1.09 倍），再迅速縮到 0.75，同時淡出
-const popOut = ms => {
-  const u = clamp01(ms / OUT_DUR), c = 4;
-  return { k: 1 - (1 - OUT_TO) * ((c + 1) * u ** 3 - c * u * u), a: 1 - smooth(clamp01((u - 0.3) / 0.7)) };
-};
+const shuffled = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 // 一組緩慢、自然的隨機擺動（-1 ~ 1）
 const wobble = hz => {
   const a = { f: rnd(hz), p: Math.random() * 6.283 }, b = { f: rnd(hz) * 1.7, p: Math.random() * 6.283 };
@@ -116,10 +121,14 @@ export default {
     // 形狀先畫成貼圖（照最大可能的大小畫，放大縮小都清楚）
     const k = SIZE * 1.45 * Math.min(2, window.devicePixelRatio || 1) * 1.15;
     const sprite = piece => this.gl.addSprite(piece, k);
-    this.chars = CHARS.map(c => ({
-      ...c, sc: center(c.shape.box), shapeS: sprite(c.shape), mouthS: sprite(c.mouth),
-      path: new Path2D(c.shape.d.join(' ')),        // 判斷有沒有點到這個字
-    }));
+    const half = s => Math.hypot(s.w2, s.h2) / 2;   // 貼圖對角線的一半（退場時算什麼時候掉出畫面）
+    this.chars = CHARS.map(c => {
+      const shapeS = sprite(c.shape), mouthS = sprite(c.mouth);
+      return {
+        ...c, sc: center(c.shape.box), shapeS, mouthS, R: half(shapeS), mouthR: half(mouthS),
+        path: new Path2D(c.shape.d.join(' ')),      // 判斷有沒有點到這個字
+      };
+    });
     this.eyes = EYES.map(set => {
       const L = set.L.box, R = set.R.box;
       const x0 = Math.min(L[0], R[0]), y0 = Math.min(L[1], R[1]);
@@ -127,6 +136,8 @@ export default {
       const mid = [(x0 + x1) / 2, (y0 + y1) / 2];
       return { rot: set.rot, parts: [set.L, set.R].map(e => ({ s: sprite(e), off: rotate([center(e.box)[0] - mid[0], center(e.box)[1] - mid[1]], set.rot) })) };
     });
+    // 眼睛：兩隻眼睛中心離這組中心的距離 + 自己的半徑，取八組裡最大的
+    this.eyeR = Math.max(...this.eyes.flatMap(set => set.parts.map(p => Math.hypot(p.off[0], p.off[1]) + half(p.s))));
     this.hitCtx = document.createElement('canvas').getContext('2d');
     stage.root.addEventListener('pointerdown', e => this.tap(stage, e));
     this.reset();
@@ -143,6 +154,17 @@ export default {
       wx: wobble(WANDER_HZ), wy: wobble(WANDER_HZ), wr: wobble(WANDER_HZ),
       parts: [0, 1, 2].map(() => ({ x: wobble(PART_HZ), y: wobble(PART_HZ), s: wobble(PART_HZ), r: wobble(PART_HZ) })),
     }));
+    // 退場：八個東西各自什麼時候開始掉（佔 OUT_DUR 的比例）；順序隨機，間隔也稍微不規則
+    // 編號：文 0–3、體 4–7（各自是 外形、嘴巴、左眼、右眼）
+    const n = this.chars.length * 4, rank = shuffled([...Array(n).keys()]);
+    this.fall = [...Array(n).keys()].map(k => {
+      const dir = Math.random() < 0.5 ? -1 : 1, m = k % 4 ? PART_SPIN : 1;   // 往左倒或往右倒；符號轉得比較快
+      return {
+        at: (rank.indexOf(k) + Math.random() * 0.8) / n * FALL_SPREAD,
+        spin: dir * rnd(FALL_SPIN) * m, spinAcc: dir * rnd(FALL_SPIN_ACC) * m,
+        drift: dir * rnd(FALL_DRIFT), driftAcc: dir * rnd(FALL_DRIFT_ACC),
+      };
+    });
   },
 
   enter() { this.reset(); },
@@ -156,10 +178,9 @@ export default {
   // 字現在的位置、角度、大小（每個元件頁單位是幾個 CSS px）
   pose(i, L, ms, t) {
     const c = this.chars[i], st = this.state[i];
-    const pi = popIn(ms - c.popAt), po = ms >= OUT_AT ? popOut(ms - OUT_AT) : { k: 1, a: 1 };
-    const k = pi.k * po.k;
+    const pi = popIn(ms - c.popAt), k = pi.k;
     return {
-      k, a: pi.a * po.a,
+      k, a: pi.a,
       x: L.ox + (c.at[0] + WANDER_PX * st.wx(t)) * L.s,
       y: L.oy + (c.at[1] + WANDER_PX * st.wy(t)) * L.s,
       rot: c.rot + WANDER_DEG * st.wr(t),
@@ -182,6 +203,28 @@ export default {
     const camMix = smooth(clamp01((ms - CAM_AT) / CAM_FADE)) * (1 - smooth(clamp01((ms - OUT_AT) / OUT_DUR)));   // 鏡頭露出來多少
     const dark = 1 - (1 - BG_ALPHA) * camMix;
 
+    // 退場：重力加速度取「最慢的那一個剛好在 GONE 掉出畫面」（會轉，所以用對角線的一半當作半徑，再多留一點游移的空間）
+    const T = OUT_DUR / 1000, S = SIZE * L.s;
+    let g = 0;
+    this.chars.forEach((c, i) => {
+      const y0 = L.oy + c.at[1] * L.s, mc = center(c.mouth.box);
+      [[0, c.R], [mc[1] - c.sc[1], c.mouthR], [c.eyes[1], this.eyeR], [c.eyes[1], this.eyeR]].forEach(([oy, r], j) => {
+        const y = y0 + oy * S, R = r * S + (WANDER_PX + 6) * L.s, left = T * (1 - this.fall[i * 4 + j].at);
+        g = Math.max(g, 2 * (L.H + R - y) / (left * left));
+      });
+    });
+    // 第 n 個東西已經掉了多少：位移、自轉；掉出畫面就不畫
+    const add = (sp, n) => {
+      const fl = this.fall[n], k = Math.max(0, (ms - OUT_AT) / 1000 - fl.at * T);   // 這一個掉了幾秒
+      if (k > 0) {
+        sp.x += fl.drift * k + 0.5 * fl.driftAcc * k * k;
+        sp.y += 0.5 * g * k * k;
+        sp.rot += (fl.spin * k + 0.5 * fl.spinAcc * k * k) * Math.PI / 180;
+        if (sp.y - Math.hypot(sp.s.w2 * sp.sx, sp.s.h2 * sp.sy) / 2 > L.H) return;   // 已經掉出畫面
+      }
+      sprites.push(sp);
+    };
+
     this.chars.forEach((c, i) => {
       const P = this.pose(i, L, ms, t), st = this.state[i];
       if (P.a <= 0.001) return;
@@ -191,14 +234,14 @@ export default {
         return { s, x: P.x + dx * P.scale, y: P.y + dy * P.scale, rot: rot * Math.PI / 180, sx: P.scale * sx, sy: P.scale * sy, a: P.a };
       };
       // 外形（漸層）
-      sprites.push({ ...place([0, 0], c.shapeS, P.rot), c1, c2 });
+      add({ ...place([0, 0], c.shapeS, P.rot), c1, c2 }, i * 4);
       // 嘴巴、兩個眼睛：各自稍微游移
       const part = (n, off, s, baseRot, sy = 1) => {
         const w = st.parts[n], k = 1 + PART_SCALE * w.s(t);
         return place([off[0] + PART_PX * w.x(t), off[1] + PART_PX * w.y(t)], s, P.rot + baseRot + PART_DEG * w.r(t), k, k * sy);
       };
       const mc = center(c.mouth.box);
-      sprites.push(part(0, [mc[0] - c.sc[0], mc[1] - c.sc[1]], c.mouthS, 0));
+      add(part(0, [mc[0] - c.sc[0], mc[1] - c.sc[1]], c.mouthS, 0), i * 4 + 1);
       // 眼睛：眨眼換一組（舊的高度變成 0，新的從 0 長回來）；兩隻眼睛各自晚 lag 毫秒開始
       const e = st.eye;
       if (e.next != null && now - e.t0 >= BLINK_CLOSE + BLINK_OPEN + Math.max(e.lag[0], e.lag[1])) { e.cur = e.next; e.next = null; }
@@ -211,7 +254,7 @@ export default {
           else if (el > 0) sy = 1 - smooth(el / BLINK_CLOSE);
         }
         const ES = this.eyes[set], p = ES.parts[n];
-        sprites.push(part(n + 1, [c.eyes[0] + p.off[0], c.eyes[1] + p.off[1]], p.s, ES.rot, Math.max(0.001, sy)));
+        add(part(n + 1, [c.eyes[0] + p.off[0], c.eyes[1] + p.off[1]], p.s, ES.rot, Math.max(0.001, sy)), i * 4 + 2 + n);
       }
     });
 
