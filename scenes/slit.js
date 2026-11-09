@@ -61,7 +61,7 @@ const REVEAL = {
 
 // 小圖案
 const SHAPE_COLORS = ['#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3'];   // Figma Page 1 左邊那五個
-const SHAPE_SIZE = [19, 25, 24];         // 每一輪小圖案的大小（px，長邊）
+const SHAPE_SIZE = [21, 21.25, 20.4];    // 每一輪小圖案的大小（px，長邊）
 const SHAPES_PER_SEC = 6;                // 一秒冒出幾個
 // 點擊畫面：點的地方附近很快地累積一堆小圖案
 const TAP_SHAPES = 14;                   // 點一下冒出幾個
