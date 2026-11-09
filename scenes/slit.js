@@ -13,7 +13,8 @@
 
    64482 – 69260 ms  圓形像遮罩一樣從畫面中心由最小長到填滿畫面，
               圓形裡面慢慢露出背景（#313131），最後整個畫面都是背景；
-   68105 ms   背景上直排的「看故事謎底玩解讀遊戲」淡入（Figma Page 1）。
+   65514 ms   背景上直排的「看故事謎底」淡入（Figma Page 1；只在圓形遮罩裡看得到，圓形還沒長到的字會跟著圓形露出來）；
+   68105 ms   「玩解讀遊戲」淡入。
 
    小圖案：每一輪掃描時，畫面上隨機的位置一秒冒出 6 個小圖案，顏色從五個顏色裡隨機挑，出現了就一直留著。
      第一輪 images/slit01.svg，第二輪 images/slit02.svg，第三輪 images/slit03.svg。
@@ -51,10 +52,10 @@ const REVEAL = {
   shape: 'circle',                       // 遮罩的形狀：'circle' 或 SVG 檔（例如原本的 '../images/slit-5star.svg'）
   from: 64482, to: 69260,               // 從最小長到整個畫面都在遮罩裡（毫秒）
   bg: '#313131',
-  // 背景上的字（Figma：BIZ UDPMincho 22px、行高 27px、#F8EFCE，直排置中）；空字串 = 空一行
+  // 背景上的字（Figma：BIZ UDPMincho 22px、行高 27px、#F8EFCE，直排置中）；空字串 = 空一行，也是分組的地方
   lines: ['看', '故', '事', '謎', '底', '', '玩', '解', '讀', '遊', '戲'],
   font: '22px/27px "BIZ UDPMincho"', color: '#f8efce',
-  textAt: 68105,                         // 字從這裡開始淡入（毫秒；在這之前背景是完整的 #313131）
+  textAt: [64634, 68105],                // 每一組字從這裡開始淡入（毫秒）：第一組「看故事謎底」、第二組「玩解讀遊戲」（最多三組）
   textFade: 1000,                        // 淡入花多久（毫秒）
 };
 
@@ -206,7 +207,7 @@ export default {
     if (k <= 0) return;
     // 字的大小跟著畫面縮放（和載入畫面一樣）；字照音樂時間淡入
     const scale = Math.max(0.82, Math.min(1.45, Math.min(W / 388, H / 743)));
-    const a = clamp01((ms - REVEAL.textAt) / REVEAL.textFade);
+    const a = [0, 1, 2].map(g => g < REVEAL.textAt.length ? clamp01((ms - REVEAL.textAt[g]) / REVEAL.textFade) : 0);   // 每一組字的透明度
     this.revealGL.draw(stage, k >= this.revealMax ? 1e6 : k, scale, a);
   },
 
@@ -324,8 +325,8 @@ precision mediump float;
 #endif
 uniform sampler2D uShape, uText;
 uniform vec2 uRes, uSeed;
-uniform float uD, uK, uTextA, uGrain, uGrainPx;
-uniform vec3 uBg, uFg;
+uniform float uD, uK, uGrain, uGrainPx;
+uniform vec3 uBg, uFg, uTextA;
 const float BINS = ${BINS}.0;
 float decode(float i){
   vec4 t = texture2D(uShape, vec2((mod(i, BINS) + 0.5) / BINS, 0.5));
@@ -341,7 +342,7 @@ void main(){
   vec2 p = (gl_FragCoord.xy - uRes * 0.5) / uD;  p.y = -p.y;      // 以畫面中心為原點（CSS px，往下為正）
   float m = clamp((uK * radiusAt(atan(p.y, p.x)) - length(p)) * uD + 0.5, 0.0, 1.0);   // 遮罩裡面 = 1（邊緣柔化一個像素）
   if (m <= 0.0) discard;
-  float t = texture2D(uText, vec2(gl_FragCoord.x / uRes.x, 1.0 - gl_FragCoord.y / uRes.y)).a * uTextA;
+  float t = dot(texture2D(uText, vec2(gl_FragCoord.x / uRes.x, 1.0 - gl_FragCoord.y / uRes.y)).rgb, uTextA);   // 三組字分別在紅、綠、藍
   vec3 c = mix(uBg, uFg, t);
   c = clamp(c + (hash(floor(gl_FragCoord.xy / uGrainPx) + uSeed) - 0.5) * uGrain, 0.0, 1.0);   // 顆粒
   gl_FragColor = vec4(c * m, m);
@@ -383,7 +384,7 @@ void main(){
   for (let b = 0; b < BINS; b++) { const v = Math.round(clamp01(R[b]) * 65535); data[b * 4] = v >> 8; data[b * 4 + 1] = v & 255; data[b * 4 + 3] = 255; }
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, BINS, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
-  // 字：畫在一張和畫布一樣大的透明圖上（大小變了才重畫）
+  // 字：畫在一張和畫布一樣大的黑色圖上，第一組用紅色、第二組綠色、第三組藍色，各自淡入（大小變了才重畫）
   tex(1, gl.LINEAR);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
   gl.uniform1i(u('uShape'), 0); gl.uniform1i(u('uText'), 1);
@@ -399,15 +400,21 @@ void main(){
     const g = c.getContext('2d');
     const m = /(\d+(?:\.\d+)?)px\/(\d+(?:\.\d+)?)px\s+(.*)/.exec(REVEAL.font) || [0, 22, 27, '"BIZ UDPMincho"'];
     const size = +m[1] * scale * d, lh = +m[2] * scale * d;
+    g.fillStyle = '#000'; g.fillRect(0, 0, w, h);
     g.font = `${size}px ${m[3]}`;
-    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
-    const n = REVEAL.lines.length;
-    REVEAL.lines.forEach((line, i) => { if (line) g.fillText(line, w / 2, h / 2 + (i - (n - 1) / 2) * lh); });
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    const n = REVEAL.lines.length, INK = ['#f00', '#0f0', '#00f'];
+    let group = 0;
+    REVEAL.lines.forEach((line, i) => {
+      if (!line) { group = Math.min(2, group + 1); return; }   // 空一行 = 下一組
+      g.fillStyle = INK[group];
+      g.fillText(line, w / 2, h / 2 + (i - (n - 1) / 2) * lh);
+    });
     gl.activeTexture(gl.TEXTURE1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
   };
   return {
-    // k：遮罩的大小（CSS px，外框最遠的一點到中心；圓形就是半徑）；scale：字的縮放；textA：字的透明度
+    // k：遮罩的大小（CSS px，外框最遠的一點到中心；圓形就是半徑）；scale：字的縮放；textA：每一組字的透明度 [第一組, 第二組, 第三組]
     draw(stage, k, scale, textA) {
       if (gl.isContextLost()) return;
       const w = canvas.width, h = canvas.height, d = w / stage.width;
@@ -419,7 +426,7 @@ void main(){
       gl.uniform2f(U.uSeed, Math.random() * 1000, Math.random() * 1000);
       gl.uniform1f(U.uD, d);
       gl.uniform1f(U.uK, k);
-      gl.uniform1f(U.uTextA, textA);
+      gl.uniform3f(U.uTextA, textA[0], textA[1], textA[2]);
       gl.uniform1f(U.uGrainPx, Math.max(1, GRAIN_SIZE * d));
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
