@@ -19,6 +19,8 @@ const BLEND_OFFSET = Math.random() * 200;
 const SPEED = 1;
 // 封面（相對於這個檔）
 const COVER = '../images/cover.webp';
+// PLAY 左邊的耳機符號（相對於這個檔）
+const HEADPHONE = new URL('../images/headphone.svg', import.meta.url).href;
 // 進度線下面那行字
 const CAPTION = 'Interactive Experience (Private Beta)';
 // 標題「每個人都是一種文體」：卡片出現時，九個字用隨機的順序一個一個快速淡入；
@@ -48,7 +50,8 @@ const CSS = `
 .ld.denied .ld-warn{opacity:1}
 .ld-btn{position:absolute;left:35px;top:471px;width:165px;height:47px;padding:0;border:0;border-radius:50px;background:#bfbfbf;color:#e5e5e5;font:28px/1 "Roboto Slab",Georgia,serif;cursor:default;transition:background-color .5s ease,opacity .3s ease;-webkit-tap-highlight-color:transparent;outline:none}
 .ld-btn span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;transition:opacity .45s ease}
-.ld-btn .p{opacity:0}
+.ld-btn .p{opacity:0;padding-left:30px}
+.ld-btn .p img{position:absolute;left:31px;top:50%;width:24px;height:24.9px;transform:translateY(-50%);pointer-events:none}
 .ld.ready .ld-btn{background:#748180;cursor:pointer}
 .ld.ready .ld-btn .l{opacity:0}
 .ld.ready .ld-btn .p{opacity:1}
@@ -80,7 +83,7 @@ export default {
           '<div class="ld-line"><i></i></div>' +
           '<div class="ld-cap">' + CAPTION + '</div>' +
           '<div class="ld-warn">請同意相機權限</div>' +
-          '<button class="ld-btn" type="button" disabled><span class="l">Loading</span><span class="p">PLAY</span></button>' +
+          '<button class="ld-btn" type="button" disabled><span class="l">Loading</span><span class="p"><img src="' + HEADPHONE + '" alt="">PLAY</span></button>' +
         '</div>' +
       '</div>';
     this.root = el.querySelector('.ld');
