@@ -2,7 +2,7 @@
    divide — 九宮格鏡頭，九種 grainrad 效果拼成一個完整的畫面
    --------------------------------------------------------------------------
    22041 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
-              點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）。
+              點畫面：九個格子隨機換位子，在新的位置上迅速重新淡入（不移動）；進場淡入還沒結束時點了不算。
    30089 ms   九格用隨機的順序錯落地淡出，最後一格在 32259 ms 完全消失，
               露出下面已經開始的 word（index.html 用 transition: 'under'）。
               前鏡頭畫面鋪滿整個畫面（像 object-fit: cover），每一格只露出自己那一塊，
@@ -92,7 +92,7 @@ export default {
     if (this.gl) this.gl.draw(null, this.layout(stage), 0, HOME.map(c => ({ fx: c, a: 0, at: c, src: c })), 0);
     // 點畫面：換位子
     stage.root.style.touchAction = 'manipulation';
-    stage.root.addEventListener('pointerdown', () => { if (this.active && this.ms < OUTRO_FROM) this.shuffle(); });   // 開始掉了就不換
+    stage.root.addEventListener('pointerdown', () => { if (this.active && this.local >= INTRO && this.ms < OUTRO_FROM) this.shuffle(); });   // 進場淡入中、開始淡出之後都不換
   },
 
   reset() {
@@ -109,6 +109,7 @@ export default {
       return OUTRO_FROM + (r + j) / 8 * span;
     });
     this.ms = 0;
+    this.local = 0;
   },
 
   enter() { this.active = true; this.reset(); },
@@ -131,7 +132,7 @@ export default {
   update(stage, f) {
     if (!this.gl) return;
     const L = this.layout(stage);
-    const t = f ? f.local * 1000 : INTRO;          // 進場進度（毫秒，照音樂時間）
+    const t = (this.local = f ? f.local * 1000 : INTRO);   // 進場進度（毫秒，照音樂時間）
     const ms = (this.ms = f ? f.t * 1000 : 0);
     const sinceTap = performance.now() - this.tapAt;
     const cards = [];
