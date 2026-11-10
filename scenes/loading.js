@@ -344,6 +344,13 @@ void main(){
 
   gl.clearColor(0xf8 / 255, 0xef / 255, 0xce / 255, 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
+  // 萬一還是被瀏覽器收回（例如 Android 的 Chrome 一頁最多 8 個 WebGL 畫布），至少顯示靜態的漸層，不會只剩一片黃色
+  let destroyed = false;
+  canvas.addEventListener('webglcontextlost', () => {
+    if (destroyed) return;
+    console.warn('背景的 WebGL 被瀏覽器收回，改用靜態漸層');
+    canvas.style.background = `linear-gradient(160deg,${colors.map((c, i) => `${c} ${Math.round(i / (n - 1) * 100)}%`).join(',')})`;
+  });
 
   return {
     draw(sec) {
@@ -357,6 +364,7 @@ void main(){
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
     destroy() {
+      destroyed = true;
       const ext = gl.getExtension('WEBGL_lose_context');
       if (ext) ext.loseContext();
     },

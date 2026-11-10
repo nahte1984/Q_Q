@@ -122,11 +122,8 @@ export default {
     const root = stage.root;
 
     // 1. 背景：和載入畫面同一個色彩交融（同一次開啟時畫面完全一樣，所以看起來是背景留著）
-    const bg = document.createElement('canvas');
-    bg.className = 'qq-canvas';
-    root.appendChild(bg);
-    this.bg = colorBlend(bg, COLORS);
-    if (!this.bg) bg.style.background = '#f8efce';
+    this.root = root;
+    this.makeBg();
 
     // 2. 鏡頭：用 WebGL 畫（左右鏡像、套 LUT 調色、壓 40% 黑、加顆粒），用手機原本的解析度，顆粒才夠細
     this.camCanvas = stage.canvas({ dpr: Math.min(2, window.devicePixelRatio || 1) });   // 最多 2 倍（3 倍的手機上看不出差別，顯示卡輕很多）
@@ -180,7 +177,20 @@ export default {
     await Promise.all([this.hint.querySelector('img').decode().catch(() => {}), stage.font('15px "Roboto Slab"', HINT_TEXT)]);
   },
 
+  // 背景的色彩交融（WebGL）。Android 的 Chrome 一頁最多只能同時有 8 個 WebGL 畫布，超過就會把最舊的弄壞
+  // （載入畫面的背景就會變成一片黃色），所以 rain 結束時把它釋放掉，重播回到 rain 時再建一個新的
+  makeBg() {
+    const bg = document.createElement('canvas');
+    bg.className = 'qq-canvas';
+    if (this.bgCanvas) this.bgCanvas.replaceWith(bg); else this.root.appendChild(bg);   // 釋放過的畫布不能再用，換一個新的
+    this.bgCanvas = bg;
+    this.bg = colorBlend(bg, COLORS);
+    if (!this.bg) bg.style.background = '#f8efce';
+    this.bgDropped = false;
+  },
+
   enter(stage, f) {
+    if (this.bgDropped) this.makeBg();
     this.drops = [];
     this.taps = [];
     this.acc = 0;
@@ -190,6 +200,7 @@ export default {
   },
 
   exit() {
+    if (this.bg) { this.bg.destroy(); this.bg = null; this.bgDropped = true; }   // 見 makeBg
     this.drops = [];
     this.taps = [];
     this.faces = [];

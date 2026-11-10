@@ -58,17 +58,27 @@ export default {
     stage.root.appendChild(el);
     this.el = el;
     this.card = el.querySelector('.rp-card');
-    this.bg = colorBlend(el.querySelector('.rp-bg'), COLORS);
-    if (!this.bg) el.classList.add('nogl');
     el.querySelector('.rp-btn').addEventListener('click', () => { if (this.live) stage.restart(); });
     await stage.font('28px "Roboto Slab"', NOTE + BUTTON);
     this.a = this.b = -1;
     this.endAt = null;
   },
 
-  enter() { this.endAt = null; this.show(0, 0); },
+  // 背景（WebGL）上場時才建立、下場就釋放：Android 的 Chrome 一頁最多只能同時有 8 個 WebGL 畫布，
+  // 超過就會把最舊的弄壞，所以不在開場時就先建好
+  enter() {
+    const old = this.el.querySelector('.rp-bg'), c = document.createElement('canvas');
+    c.className = 'rp-bg';
+    old.replaceWith(c);                                  // 釋放過的畫布不能再用，每次換一個新的
+    this.bg = colorBlend(c, COLORS);
+    this.el.classList.toggle('nogl', !this.bg);
+    this.endAt = null; this.show(0, 0);
+  },
 
-  exit() { this.endAt = null; this.show(0, 0); },
+  exit() {
+    if (this.bg) { this.bg.destroy(); this.bg = null; }
+    this.endAt = null; this.show(0, 0);
+  },
 
   // a：整個畫面（背景）的不透明度；b：字和按鈕的不透明度
   show(a, b) {
