@@ -46,7 +46,7 @@ const CSS = `
 .ld-card{position:absolute;left:50%;top:50%;width:235px;height:518px;transform:translate(-50%,-50%) scale(var(--s,1));opacity:0;transition:opacity .9s ease}
 .ld.in .ld-card{opacity:1}
 .ld-art{position:absolute;left:0;top:0;width:235px;height:235px;border-radius:10px;box-shadow:0 4px 20px 2px rgba(0,0,0,.1);cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
-.ld-cover{position:absolute;left:0;top:0;width:100%;height:100%;border-radius:10px;object-fit:cover;display:block;background:#d2d6d3}
+.ld-cover{position:absolute;left:0;top:0;width:100%;height:100%;border-radius:10px;object-fit:cover;display:block;background:#d2d6d3;pointer-events:none;-webkit-user-drag:none}
 .ld-glows{position:absolute;inset:0;clip-path:inset(0 round 10px);pointer-events:none}
 .ld-glow{position:absolute;border-radius:50%;background:#fff;opacity:0;pointer-events:none}
 .ld-title{position:absolute;left:-1px;top:251px;font:32px/42px "BIZ UDPMincho","Hiragino Mincho ProN","Songti TC",serif;color:#748180;white-space:nowrap}
@@ -126,6 +126,13 @@ export default {
     this.art = el.querySelector('.ld-art');
     this.glows = el.querySelector('.ld-glows');
     this.art.addEventListener('pointerdown', e => this.tapCover(e));
+    // 手機：快速點兩下不要放大畫面（iOS 點兩下圖片會自動放大，而且整頁鎖住手勢，放大了就縮不回來）
+    // 封面：直接擋掉預設的觸控行為（點封面的效果用 pointerdown，不受影響）
+    this.art.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+    // 整個載入畫面：第二下點得太快（350 毫秒內）就擋掉，不讓它變成「點兩下放大」
+    let lastTouch = -1e9;
+    el.addEventListener('touchend', e => { if (e.timeStamp - lastTouch < 350) e.preventDefault(); lastTouch = e.timeStamp; }, { passive: false });
+    el.addEventListener('dblclick', e => e.preventDefault());
 
     this.target = 0; this.shown = 0; this.isReady = false; this.wantReady = false; this.go = null;
 
