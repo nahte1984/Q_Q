@@ -1,24 +1,25 @@
 /* ==========================================================================
-   divide — 九宮格鏡頭，九種 grainrad 效果拼成一個完整的畫面
+   divide — 九個扇形的鏡頭，九種 grainrad 效果拼成一個完整的畫面
    --------------------------------------------------------------------------
-   22041 ms   九宮格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
-              點畫面：九個格子隨機換位子，新的排列直接疊在舊的上面迅速淡入（不移動，中間不會閃出底色）；
+   22041 ms   九格用隨機的順序一格一格淡入，上一段（rain）同時淡出到背景色，整個進場 1300 ms。
+              點畫面：九格的效果隨機換位子，新的排列直接疊在舊的上面迅速淡入（不移動，中間不會閃出底色）；
               進場淡入還沒結束時點了不算。
    30089 ms   九格用隨機的順序錯落地淡出，最後一格在 32259 ms 完全消失，
               露出下面已經開始的 word（index.html 用 transition: 'under'）。
               前鏡頭畫面鋪滿整個畫面（像 object-fit: cover），每一格只露出自己那一塊，
               再各自套一種 grainrad 的效果；九格拼起來就是完整的鏡頭畫面。
-   版面：      整個畫面均分成九宮格（寬、高各三等份），格子之間沒有縫、沒有圓角。
+   版面：      從畫面中心往畫面邊緣平均分成九個扇形，每個 40 度（手繪草圖），格子之間沒有縫；
+              每次進場，九種效果隨機分配到九個扇形。
 
-   效果的演算法照 grainrad.com 的 shader 寫（參數用截圖 01–09 的設定），
-   由左到右、由上到下：
+   效果的演算法照 grainrad.com 的 shader 寫（參數用截圖 01–09 的設定）：
      01 Halftone    02 ASCII（DETAILED）03 Contour
      04 Noise Field 05 Blockify         06 Dithering
      07 Dots        08 Voronoi          09 Threshold
    九格都用同一個 WebGL 畫布畫，手機上也很輕。
    ========================================================================== */
 
-/* ---------- 版面 ---------- */
+/* ---------- 版面：從畫面中心往邊緣分成九個扇形，每個 40 度 ---------- */
+const SECTOR_START = 20;                 // 第一條分界線的角度（度；0 = 往右、90 = 往正下方，順時針增加）
 const BG_COLOR = '#313131';              // 格子下面的底色（進場時蓋過上一段；換位子時格子重新淡入的底）
 
 /* ---------- 進場：九格用隨機的順序一格一格淡入，背景色同時蓋過上一段 ----------
@@ -29,7 +30,7 @@ const CARD_FADE = 500;                   // 每一格淡入花多久（毫秒）
 /* ---------- 點畫面：九個格子隨機換位子 ---------- */
 const TAP_FADE = 200;                    // 每一格的新效果疊在舊的上面淡入，花多久（毫秒）
 const TAP_SPREAD = 200;                  // 九格的淡入開始時間在這段時間裡隨機錯開（毫秒；0 = 九格一起淡入）
-const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂）
+const SHUFFLE_CARRIES_IMAGE = false;      // true：格子帶著自己那塊畫面一起移動（畫面被打亂；扇形的話是繞著中心轉過去）
                                          // false：只有效果換位子，畫面還是完整的
 
 /* ---------- 退場：九格用隨機的順序錯落地淡出 ---------- */
@@ -100,7 +101,7 @@ export default {
     this.order = shuffled(HOME);          // 淡入的順序
     // 排列：slot[c] = 第 c 種效果在哪個位置；order = 換位子時九格淡入的順序；at = 什麼時候換的
     // 換位子時新的排列疊在最上面淡入，下面的排列一直保持不透明，等上面的完全淡入才拿掉，所以不會閃出底色
-    this.layers = [{ slot: HOME.slice(), order: HOME.slice(), at: -Infinity }];
+    this.layers = [{ slot: shuffled(HOME), order: HOME.slice(), at: -Infinity }];   // 一開始：九種效果隨機分配到九個扇形
     // 退場：每一格什麼時候開始淡出（毫秒，歌曲時間）；順序隨機，間隔也不規則；
     // 第一格在 OUTRO_FROM 開始，最後一格剛好在 OUTRO_TO 淡完
     const rank = shuffled(HOME), span = OUTRO_TO - OUTRO_FROM - OUTRO_FADE;
@@ -181,7 +182,7 @@ function effectLayer(canvas, atlas) {
   const vs = `
 attribute vec2 p;
 uniform vec2 uRes;
-uniform vec4 uRect;          // 這一格在畫面上的位置（裝置像素，對齊像素邊界，相鄰的格子剛好接上、不留縫）
+uniform vec4 uRect;          // 要畫的範圍（裝置像素）：這個扇形的外框；扇形外面的像素在 fragment shader 裡丟掉
 varying vec2 vLocal;         // 格子裡的位置（裝置像素）
 void main(){
   vLocal = p * uRect.zw;
@@ -197,7 +198,8 @@ precision mediump float;
 uniform sampler2D uCam, uAtlas;
 uniform float uHasCam, uUnit, uTime, uGrain, uGrainPx, uFx, uAlpha;
 uniform vec3 uBgCol;
-uniform vec2 uCard, uGridG, uCamScale, uSeed, uSrc;
+uniform vec2 uGridG, uCamScale, uSeed, uCenter, uRes;
+uniform float uStart, uSector, uSrcRot;
 uniform vec3 uLine;
 varying vec2 vLocal;
 
@@ -344,7 +346,13 @@ void main(){
     gl_FragColor = vec4(b * uAlpha, uAlpha);
     return;
   }
-  vec2 q = (uSrc + clamp(vLocal, vec2(0.0), uCard)) / uUnit;   // grainrad 的像素座標
+  // 這個像素屬於第幾個扇形：每一格都用同樣的算法，所以每個像素剛好只屬於一格，扇形之間不會有縫也不會重疊
+  vec2 pos = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);   // 畫面上的位置（裝置像素，y 往下）
+  vec2 dc = pos - uCenter;
+  float k = floor(mod(atan(dc.y, dc.x) - uStart, 6.2831853) / 0.6981317);   // 0–8（40 度 = 0.698 弧度）
+  if (min(k, 8.0) != uSector) discard;
+  float cr = cos(uSrcRot), sr = sin(uSrcRot);                  // 畫面從哪個扇形取（平常就是自己這一格）
+  vec2 q = (uCenter + vec2(dc.x * cr - dc.y * sr, dc.x * sr + dc.y * cr)) / uUnit;   // grainrad 的像素座標
   vec3 c;
   if (uFx < 0.5) c = fxHalftone(q);
   else if (uFx < 1.5) c = fxAscii(q);
@@ -397,7 +405,7 @@ void main(){
 
   const u = n => gl.getUniformLocation(prog, n);
   const U = {};
-  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uBgCol', 'uCard', 'uGridG', 'uCamScale', 'uSeed', 'uSrc']) U[n] = u(n);
+  for (const n of ['uHasCam', 'uUnit', 'uTime', 'uGrainPx', 'uFx', 'uAlpha', 'uRes', 'uRect', 'uBgCol', 'uGridG', 'uCamScale', 'uSeed', 'uCenter', 'uStart', 'uSector', 'uSrcRot']) U[n] = u(n);
   gl.uniform1i(u('uCam'), 0);
   gl.uniform1i(u('uAtlas'), 1);
   gl.uniform3fv(u('uLine'), hex(P.contour.lineColor));
@@ -414,7 +422,7 @@ void main(){
   };
 
   return {
-    // cards：[{ fx: 第幾種效果, at: 畫在第幾格, src: 畫面從第幾格取, a: 透明度 }]（格子 0–8，由左到右、由上到下）
+    // cards：[{ fx: 第幾種效果, at: 畫在第幾格, src: 畫面從第幾格取, a: 透明度 }]（扇形 0–8，從 SECTOR_START 開始順時針）
     // bgA：背景色的透明度（進場時從 0 到 1，蓋過上一段）
     draw(video, L, time, cards, bgA) {
       if (gl.isContextLost()) return;
@@ -451,17 +459,25 @@ void main(){
         gl.uniform1f(U.uAlpha, bgA);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
-      // 第 s 格（0–8，由左到右、由上到下）的位置：格線取整數像素，九格剛好鋪滿畫布
-      const edge = (i, n) => Math.round(i * n / 3);
-      const cell = s => {
-        const cx = s % 3, cy = (s - cx) / 3, x0 = edge(cx, Wd), y0 = edge(cy, Hd);
-        return [x0, y0, edge(cx + 1, Wd) - x0, edge(cy + 1, Hd) - y0];
+      // 第 s 個扇形（0–8）：從畫面中心、SECTOR_START 的方向開始順時針，每個 40 度
+      // 只畫蓋住這個扇形的三角形的外框，扇形外面的像素在 shader 裡丟掉
+      const cx = Wd / 2, cy = Hd / 2, SW = Math.PI * 2 / 9, start = SECTOR_START * Math.PI / 180;
+      const R = Math.hypot(Wd, Hd) / 2 / Math.cos(SW / 2) + 2;    // 三角形夠大，蓋得住扇形到畫面角落的部分
+      const box = s => {
+        const a0 = start + s * SW, a1 = a0 + SW;
+        const xs = [cx, cx + R * Math.cos(a0), cx + R * Math.cos(a1)], ys = [cy, cy + R * Math.sin(a0), cy + R * Math.sin(a1)];
+        const x0 = Math.max(0, Math.floor(Math.min(...xs))), x1 = Math.min(Wd, Math.ceil(Math.max(...xs)));
+        const y0 = Math.max(0, Math.floor(Math.min(...ys))), y1 = Math.min(Hd, Math.ceil(Math.max(...ys)));
+        return [x0, y0, x1 - x0, y1 - y0];
       };
+      gl.uniform2f(U.uCenter, cx, cy);
+      gl.uniform1f(U.uStart, start);
       for (const c of cards) {
-        const [x, y, w, h] = cell(c.at), [sx, sy] = cell(c.src);
+        const [x, y, w, h] = box(c.at);
+        if (w <= 0 || h <= 0) continue;
         gl.uniform4f(U.uRect, x, y, w, h);
-        gl.uniform2f(U.uCard, w, h);
-        gl.uniform2f(U.uSrc, sx, sy);
+        gl.uniform1f(U.uSector, c.at);
+        gl.uniform1f(U.uSrcRot, (c.src - c.at) * SW);
         gl.uniform1f(U.uFx, c.fx);
         gl.uniform1f(U.uAlpha, c.a);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
