@@ -26,7 +26,7 @@ const OUTRO_TO = 32259;                  // 完全消失（word 那一行的 at 
 const COLORS = ['#d2d6d3', '#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3', '#ff8f8f'];
 const TEXT = { color: '#313131', left: -115.963, top: -11.485, width: 611 };   // 假文章的位置（px，以 388 寬的畫面計）
 const FONT_DESKTOP = 18;                 // 假文章的字級（px）：桌機
-const FONT_PHONE = 10;                   // 手機（固定大小，不跟著畫面縮放）
+const FONT_PHONE = 12;                   // 手機（固定大小，不跟著畫面縮放）
 const IMG = { w: 256, h: 274 };          // 中間的鏡頭矩形（置中）
 
 /* ---------- 網點（grainrad Halftone，照截圖的設定） ---------- */
