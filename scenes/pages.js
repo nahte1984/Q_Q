@@ -11,14 +11,14 @@
    定格：      一秒取樣 STEPS_PER_SEC（6）次，照歌曲時間對齊。每一格重新產生一篇假文章、
               抓一張鏡頭的靜態畫面做網點；兩格之間畫面完全不動，所以看起來像 stop motion。
 
-   22041 ms   一格一格（定格的節奏）淡入，蓋過上一段 rain（index.html 用 transition: 'over'）。
+   22041 ms   只用三格（定格的節奏，1/3 → 2/3 → 全滿）淡入，蓋過上一段 rain（index.html 用 transition: 'over'）。
    30089 ms   一格一格淡出，32259 ms 完全消失，露出下面已經開始的 word（transition: 'under'）。
    ========================================================================== */
 
 /* ---------- 時間 ---------- */
 const STEPS_PER_SEC = 6;                 // 一秒幾格（假文章重新產生、鏡頭重新取樣的次數）
 const START = 22041;                     // 上場（index.html 裡 pages 那一行的 at）
-const INTRO = 1300;                      // 淡入要多久（毫秒；index.html 裡 pages 那一行的 dur）
+const INTRO_FRAMES = 3;                  // 淡入用幾格（一格 1/6 秒；上場那一格算第一格）。index.html 裡 pages 那一行的 dur 要蓋過這幾格
 const OUTRO_FROM = 30089;                // 開始淡出（index.html 裡 word 那一行的 at）
 const OUTRO_TO = 32259;                  // 完全消失（word 那一行的 at + dur）
 
@@ -171,7 +171,8 @@ export default {
     this.tick = tick;
     const ms = tick * 1000 / STEPS_PER_SEC;           // 這一格的時間
     // 淡入、淡出也跟著一格一格跳
-    const a = clamp01((ms - START) / INTRO + 1 / (INTRO / 1000 * STEPS_PER_SEC)) *
+    const frame = tick - Math.floor(START / 1000 * STEPS_PER_SEC) + 1;   // 上場後第幾格（上場那一格是 1）
+    const a = clamp01(frame / INTRO_FRAMES) *
       (1 - clamp01((ms - OUTRO_FROM) / (OUTRO_TO - OUTRO_FROM)));
     this.el.style.opacity = String(a);
     if (a <= 0) return;
