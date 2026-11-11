@@ -40,7 +40,7 @@ const HALFTONE = {
   bg: '#000000',                         // Mono：Background（網點之間）
 };
 // 網點大小：1 = 照 grainrad（鏡頭畫面短邊當作 720 像素）；覺得太細或太粗就調這個
-const EFFECT_SCALE = 1;
+const EFFECT_SCALE = 2;
 const MIN_DOT_PX = 3;                    // 網點間距至少幾個螢幕像素（電腦螢幕像素比較大，太細會出現摩爾紋）
 
 /* ---------- 假文章（Lorem Ipsum） ---------- */
