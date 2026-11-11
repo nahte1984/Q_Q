@@ -24,7 +24,7 @@ const OUTRO_TO = 32259;                  // 完全消失（word 那一行的 at 
 /* ---------- 版面（Figma pages，388 × 743） ---------- */
 // 背景色：每次進場、每次點畫面都從這裡隨機選一個（Figma Page 1 的色票，和 word 的漸層色一樣）
 const COLORS = ['#d2d6d3', '#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3', '#ff8f8f'];
-const TEXT = { size: 16, color: '#313131', left: -115.963, top: -11.485, width: 611 };   // 假文章（px，以 388 寬的畫面計）
+const TEXT = { size: 13, color: '#313131', left: -115.963, top: -11.485, width: 611 };   // 假文章（px，以 388 寬的畫面計）
 const IMG = { w: 256, h: 274 };          // 中間的鏡頭矩形（置中）
 
 /* ---------- 網點（grainrad Halftone，照截圖的設定） ---------- */
