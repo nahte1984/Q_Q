@@ -3,7 +3,7 @@
    --------------------------------------------------------------------------
    版面照 Figma「pages」（388 × 743 的畫面），依螢幕大小等比縮放：
      背景      每次進場在 COLORS 裡隨機選一個顏色；點畫面任一處再隨機換一個
-     假文章    Roboto Slab 16px、#313131；文字框比畫面寬（Figma：611 寬、從 -116 開始），
+     假文章    Roboto Slab、#313131（桌機 14px、手機 12px，不跟著畫面縮放）；文字框比畫面寬（Figma：611 寬、從 -116 開始），
               所以每一行的頭尾都被畫面切掉；一直鋪到畫面最下面
      鏡頭      置中的 256 × 274 矩形，前鏡頭畫面像 object-fit: cover 一樣鋪滿、左右鏡像，
               做成 grainrad 的 Halftone（參數見 HALFTONE：黑底白點），直接蓋在文章上（不混色）
@@ -24,7 +24,9 @@ const OUTRO_TO = 32259;                  // 完全消失（word 那一行的 at 
 /* ---------- 版面（Figma pages，388 × 743） ---------- */
 // 背景色：每次進場、每次點畫面都從這裡隨機選一個（Figma Page 1 的色票，和 word 的漸層色一樣）
 const COLORS = ['#d2d6d3', '#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3', '#ff8f8f'];
-const TEXT = { size: 13, color: '#313131', left: -115.963, top: -11.485, width: 611 };   // 假文章（px，以 388 寬的畫面計）
+const TEXT = { color: '#313131', left: -115.963, top: -11.485, width: 611 };   // 假文章的位置（px，以 388 寬的畫面計）
+const FONT_DESKTOP = 14;                 // 假文章的字級（px）：桌機
+const FONT_PHONE = 12;                   // 手機（固定大小，不跟著畫面縮放）
 const IMG = { w: 256, h: 274 };          // 中間的鏡頭矩形（置中）
 
 /* ---------- 網點（grainrad Halftone，照截圖的設定） ---------- */
@@ -59,6 +61,11 @@ const clamp01 = x => Math.max(0, Math.min(1, x));
 const hex = h => { const v = parseInt(h.slice(1), 16); return [(v >> 16 & 255) / 255, (v >> 8 & 255) / 255, (v & 255) / 255]; };
 const rint = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
 const pick = a => a[Math.floor(Math.random() * a.length)];
+// 手機：觸控、而且螢幕短邊不超過 600px（和 stage.js 的判斷一樣；寫在這裡，這個檔就不必等 stage.js 更新）
+const isPhone = () => {
+  try { return (matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0) && Math.min(screen.width, screen.height) <= 600; }
+  catch (e) { return false; }
+};
 
 // 一句：6–16 個字，第一個字大寫，中間偶爾有逗號
 function sentence() {
@@ -114,7 +121,7 @@ export default {
     const over = -TEXT.left * s;                     // 文字框左邊超出畫面多少
     const right = (TEXT.width + TEXT.left - 388) * s; // 右邊超出多少
     Object.assign(this.txt.style, {
-      left: -over + 'px', top: TEXT.top * s + 'px', width: W + over + right + 'px', fontSize: TEXT.size * s + 'px',
+      left: -over + 'px', top: TEXT.top * s + 'px', width: W + over + right + 'px', fontSize: (isPhone() ? FONT_PHONE : FONT_DESKTOP) + 'px',
     });
     const w = IMG.w * s, h = IMG.h * s;
     this.rect = { x: (W - w) / 2, y: (H - h) / 2, w, h };
