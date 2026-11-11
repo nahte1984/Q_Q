@@ -6,7 +6,8 @@
      假文章    Roboto Slab、#313131（桌機 14px、手機 12px，不跟著畫面縮放）；文字框比畫面寬（Figma：611 寬、從 -116 開始），
               所以每一行的頭尾都被畫面切掉；一直鋪到畫面最下面
      鏡頭      置中的 256 × 274 矩形，前鏡頭畫面像 object-fit: cover 一樣鋪滿、左右鏡像，
-              做成 grainrad 的 Halftone（參數見 HALFTONE：黑底白點），直接蓋在文章上（不混色）
+              做成 grainrad 的 Halftone（參數見 HALFTONE：黑底白點），直接蓋在文章上（不混色）；
+              上面再疊一個一樣大、和當下背景色一樣的色塊，用 multiply：白點變成背景色，黑的地方還是黑的
    定格：      一秒取樣 STEPS_PER_SEC（6）次，照歌曲時間對齊。每一格重新產生一篇假文章、
               抓一張鏡頭的靜態畫面做網點；兩格之間畫面完全不動，所以看起來像 stop motion。
 
@@ -87,7 +88,8 @@ const CSS = `
   -webkit-text-size-adjust:100%;text-size-adjust:100%;
   text-align:left;overflow-wrap:break-word;pointer-events:none}
 .pg-txt p{margin:0}
-.pg-img{position:absolute;pointer-events:none}
+.pg-img,.pg-tint{position:absolute;pointer-events:none}
+.pg-tint{mix-blend-mode:multiply}
 `;
 
 export default {
@@ -101,12 +103,13 @@ export default {
     }
     const el = this.el = document.createElement('div');
     el.className = 'pg';
-    el.innerHTML = '<div class="pg-txt"></div><canvas class="pg-img"></canvas>';
+    el.innerHTML = '<div class="pg-txt"></div><canvas class="pg-img"></canvas><div class="pg-tint"></div>';
     stage.root.appendChild(el);
     this.txt = el.querySelector('.pg-txt');
     this.canvas = el.querySelector('.pg-img');
+    this.tint = el.querySelector('.pg-tint');      // 鏡頭上的色塊（顏色跟著背景，multiply）
     this.gl = halftoneLayer(this.canvas);
-    if (!this.gl) this.canvas.style.display = 'none';
+    if (!this.gl) this.canvas.style.display = this.tint.style.display = 'none';
     this.color = null;
     this.recolor();
     // 點畫面任一處：背景在 COLORS 裡隨機換成另一個顏色
@@ -126,7 +129,7 @@ export default {
     });
     const w = IMG.w * s, h = IMG.h * s;
     this.rect = { x: (W - w) / 2, y: (H - h) / 2, w, h };
-    Object.assign(this.canvas.style, { left: this.rect.x + 'px', top: this.rect.y + 'px', width: w + 'px', height: h + 'px' });
+    for (const e of [this.canvas, this.tint]) Object.assign(e.style, { left: this.rect.x + 'px', top: this.rect.y + 'px', width: w + 'px', height: h + 'px' });
     const d = Math.min(3, stage.dpr || window.devicePixelRatio || 1);
     this.canvas.width = Math.max(1, Math.round(w * d));
     this.canvas.height = Math.max(1, Math.round(h * d));
@@ -140,6 +143,7 @@ export default {
     do c = pick(COLORS); while (c === this.color && COLORS.length > 1);
     this.color = c;
     this.el.style.background = c;
+    this.tint.style.background = c;                  // 鏡頭上的色塊也換成同一個顏色
   },
 
   // 產生一篇新的假文章，鋪到畫面最下面為止
@@ -174,9 +178,9 @@ export default {
     this.write();
     const v = stage.camera;
     if (this.gl && v && v.videoWidth > 0) {
-      this.canvas.style.display = '';
+      this.canvas.style.display = this.tint.style.display = '';
       this.gl.draw(v, this.rect, this.canvas.width / this.rect.w);
-    } else this.canvas.style.display = 'none';       // 沒有鏡頭就只有文章
+    } else this.canvas.style.display = this.tint.style.display = 'none';   // 沒有鏡頭就只有文章
   },
 
   exit() {
