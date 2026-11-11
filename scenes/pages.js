@@ -8,6 +8,7 @@
      鏡頭      置中的 256 × 274 矩形，前鏡頭畫面像 object-fit: cover 一樣鋪滿、左右鏡像，
               做成 grainrad 的 Halftone（參數見 HALFTONE：黑底白點），直接蓋在文章上（不混色）；
               上面再疊一個一樣大、和當下背景色一樣的色塊，用 multiply：白點變成背景色，黑的地方還是黑的
+   顆粒：      整個畫面最上面疊一層顆粒（和其他段落一樣大小、一樣強度），和其他段落一樣每一幀都換，不跟著定格。
    定格：      一秒取樣 STEPS_PER_SEC（6）次，照歌曲時間對齊。每一格重新產生一篇假文章、
               抓一張鏡頭的靜態畫面做網點；兩格之間畫面完全不動，所以看起來像 stop motion。
 
@@ -45,6 +46,10 @@ const HALFTONE = {
 // 網點大小：1 = 照 grainrad（鏡頭畫面短邊當作 720 像素）；覺得太細或太粗就調這個
 const EFFECT_SCALE = 2;
 const MIN_DOT_PX = 3;                    // 網點間距至少幾個螢幕像素（電腦螢幕像素比較大，太細會出現摩爾紋）
+
+/* ---------- 顆粒（和其他段落一樣：一顆 0.5 px、亮暗 ±0.0875；不要顆粒就把 GRAIN_AMOUNT 改成 0） ---------- */
+const GRAIN_SIZE = 0.5, GRAIN_AMOUNT = 0.175;
+const GRAIN_TILE = 512;                  // 一張顆粒圖幾顆見方（重複鋪滿畫面，每一格隨機移動位置，看起來就是新的顆粒）
 
 /* ---------- 假文章（Lorem Ipsum） ---------- */
 const WORDS = ('lorem ipsum dolor sit amet consectetur adipiscing elit integer pretium lectus finibus quis consequat ante pharetra ' +
@@ -90,6 +95,8 @@ const CSS = `
 .pg-txt p{margin:0}
 .pg-img,.pg-tint{position:absolute;pointer-events:none}
 .pg-tint{mix-blend-mode:multiply}
+.pg-grain{position:absolute;inset:0;pointer-events:none;background-repeat:repeat;image-rendering:pixelated}
+.pg-grain.up{mix-blend-mode:plus-lighter}
 `;
 
 export default {
@@ -103,11 +110,13 @@ export default {
     }
     const el = this.el = document.createElement('div');
     el.className = 'pg';
-    el.innerHTML = '<div class="pg-txt"></div><canvas class="pg-img"></canvas><div class="pg-tint"></div>';
+    el.innerHTML = '<div class="pg-txt"></div><canvas class="pg-img"></canvas><div class="pg-tint"></div><div class="pg-grain dn"></div><div class="pg-grain up"></div>';
     stage.root.appendChild(el);
     this.txt = el.querySelector('.pg-txt');
     this.canvas = el.querySelector('.pg-img');
     this.tint = el.querySelector('.pg-tint');      // 鏡頭上的色塊（顏色跟著背景，multiply）
+    this.grain = [...el.querySelectorAll('.pg-grain')];   // 最上面的顆粒：變暗的一層、變亮的一層
+    await this.makeGrain();
     this.gl = halftoneLayer(this.canvas);
     if (!this.gl) this.canvas.style.display = this.tint.style.display = 'none';
     this.color = null;
@@ -133,8 +142,30 @@ export default {
     const d = Math.min(3, stage.dpr || window.devicePixelRatio || 1);
     this.canvas.width = Math.max(1, Math.round(w * d));
     this.canvas.height = Math.max(1, Math.round(h * d));
+    // 顆粒：一顆 GRAIN_SIZE 個 CSS px（螢幕像素太大的話就一顆一個螢幕像素，和其他段落的 WebGL 一樣）
+    this.grainPer = Math.min(d, 1 / GRAIN_SIZE);     // 每個 CSS px 幾顆
+    for (const e of this.grain) e.style.backgroundSize = GRAIN_TILE / this.grainPer + 'px';
     this.H = H;
     this.tick = null;                                // 下一幀重畫
+  },
+
+  // 顆粒圖：每一顆隨機變亮或變暗，和其他段落的 WebGL 一樣是「加上」±0.0875
+  // 變亮的一層：白色、用 plus-lighter（直接把亮度加上去）；變暗的一層：黑色蓋上去（背景大約是 0.85 的亮度，所以除以 0.85）
+  async makeGrain() {
+    if (!(GRAIN_AMOUNT > 0)) { for (const e of this.grain) e.style.display = 'none'; return; }
+    const N = GRAIN_TILE, mk = () => { const c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d'); return { c, g, img: g.createImageData(N, N) }; };
+    const dn = mk(), up = mk();
+    for (let i = 0; i < N * N * 4; i += 4) {
+      const v = (Math.random() - 0.5) * GRAIN_AMOUNT;
+      up.img.data[i] = up.img.data[i + 1] = up.img.data[i + 2] = 255;
+      up.img.data[i + 3] = v > 0 ? Math.round(v * 255) : 0;
+      dn.img.data[i + 3] = v < 0 ? Math.round(Math.min(1, -v / 0.85) * 255) : 0;   // 黑色
+    }
+    await Promise.all([dn, up].map(async (t, k) => {
+      t.g.putImageData(t.img, 0, 0);
+      const blob = await new Promise(r => t.c.toBlob(r));
+      if (blob) this.grain[k].style.backgroundImage = `url(${URL.createObjectURL(blob)})`;
+    }));
   },
 
   // 背景隨機換成 COLORS 裡的另一個顏色（不會跟現在的一樣）
@@ -165,6 +196,10 @@ export default {
   },
 
   update(stage, f) {
+    // 顆粒：每一幀都換一個隨機位置（對齊顆粒的格子），和其他段落一樣一直在動，不跟著定格
+    const off = () => -Math.floor(Math.random() * GRAIN_TILE) / this.grainPer + 'px';
+    const pos = `${off()} ${off()}`;
+    for (const e of this.grain) e.style.backgroundPosition = pos;   // 兩層一起移動，亮暗才對得上
     // 定格：照歌曲時間切成一秒 6 格，換格的時候才更新畫面
     const tick = Math.floor(f.t * STEPS_PER_SEC);
     if (tick === this.tick) return;
