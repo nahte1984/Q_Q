@@ -25,8 +25,8 @@ const OUTRO_TO = 32259;                  // 完全消失（word 那一行的 at 
 // 背景色：每次進場、每次點畫面都從這裡隨機選一個（Figma Page 1 的色票，和 word 的漸層色一樣）
 const COLORS = ['#d2d6d3', '#f8efce', '#ffcdb4', '#cdb2f1', '#ccebc8', '#ffb5d3', '#ff8f8f'];
 const TEXT = { color: '#313131', left: -115.963, top: -11.485, width: 611 };   // 假文章的位置（px，以 388 寬的畫面計）
-const FONT_DESKTOP = 14;                 // 假文章的字級（px）：桌機
-const FONT_PHONE = 12;                   // 手機（固定大小，不跟著畫面縮放）
+const FONT_DESKTOP = 18;                 // 假文章的字級（px）：桌機
+const FONT_PHONE = 10;                   // 手機（固定大小，不跟著畫面縮放）
 const IMG = { w: 256, h: 274 };          // 中間的鏡頭矩形（置中）
 
 /* ---------- 網點（grainrad Halftone，照截圖的設定） ---------- */
@@ -84,6 +84,7 @@ function paragraph(first) {
 const CSS = `
 .pg{position:absolute;inset:0;overflow:hidden;isolation:isolate;opacity:0;-webkit-user-select:none;user-select:none}
 .pg-txt{position:absolute;margin:0;color:${TEXT.color};font-family:"Roboto Slab",Georgia,serif;font-weight:400;line-height:normal;
+  -webkit-text-size-adjust:100%;text-size-adjust:100%;
   text-align:left;overflow-wrap:break-word;pointer-events:none}
 .pg-txt p{margin:0}
 .pg-img{position:absolute;pointer-events:none}
