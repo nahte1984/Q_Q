@@ -23,7 +23,7 @@
   // 開發時用 index.html?dev 顯示資訊，index.html?dev&from=60000 從 60 秒開始
   mv([
     { at: 0, scene: 'rain' },
-    { at: 22041, scene: 'pages', transition: 'over', dur: 1300 },    // 假文章＋鏡頭網點，一秒 6 格的定格動畫，一格一格淡入蓋過 rain（pages.js 的 INTRO）
+    { at: 22041, scene: 'pages', transition: 'over', dur: 500 },     // 假文章＋鏡頭網點，一秒 6 格的定格動畫，用三格淡入蓋過 rain（pages.js 的 INTRO_FRAMES）
                                                                      // 原本的九個扇形：把 'pages' 換回 'divide' 就好（divide.js 還在）
     { at: 30089, scene: 'word', transition: 'under', dur: 2170 },   // 文、體：pages 一格一格淡出（到 32259），露出下面的 word；文體 42334 完整消失
     { at: 43210, scene: 'slit' },                                    // 圓形、星星、愛心三輪 slit-scan（時間在 slit.js 的 ROUNDS）
